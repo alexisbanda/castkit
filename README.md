@@ -138,6 +138,37 @@ versión que los produjo:
   guarda `parametros` en `versiones.v<actual>.parametros.<etapa>` del `diseno.json`, sin tocar las
   demás etapas ni otras versiones.
 
+## Entregar la malla en bruto
+
+La malla en bruto (de imagen→3D, escaneo o escultura) se obtiene fuera de castkit.
+`castkit ingesta` la incorpora a la versión actual del diseño:
+
+```bash
+uv run castkit ingesta guagua-pan ~/Descargas/guagua.stl
+```
+
+Esto, si `guagua-pan` está en `v1`, valida que `~/Descargas/guagua.stl` sea un STL legible
+(con al menos una cara; no necesita estar cerrado) y lo copia a
+`guagua-pan/input/guagua-pan_v1_bruto.stl` (nombre generado con `nombre_archivo`). Además
+registra, con `registrar_parametros` en `versiones.v1.parametros.ingesta`, el nombre original
+del archivo, su huella `sha256` y sus `caras` y `vertices`.
+
+Se rechazan, con un mensaje en español y sin copiar ni registrar nada: archivos que no sean
+`.stl` (sin distinguir mayúsculas, por ejemplo `.obj`), archivos vacíos, archivos que no se
+puedan leer como STL (dañados) y STL sin ninguna cara.
+
+### Opciones
+
+| Opción | Obligatoria | Valores aceptados |
+| --- | --- | --- |
+| `nombre` (posicional) | sí | nombre de un diseño ya dado de alta |
+| `archivo` (posicional) | sí | ruta a un archivo `.stl` existente y legible |
+| `--reemplazar` | no | reemplaza sin preguntar la malla ya guardada en la versión actual, si existe |
+
+Si la versión actual ya tiene una malla guardada y no se pasa `--reemplazar`: en una terminal
+interactiva se pregunta «¿Reemplazarla? (s/N)» (solo «s», «si» o «sí» reemplazan; cualquier otra
+respuesta no modifica nada); sin terminal, falla indicando que hay que usar `--reemplazar`.
+
 ## Integración continua
 
 GitHub Actions ejecuta en cada pull request y en cada push a `main`, en Linux, macOS y Windows: `uv sync --locked`, `uv run ruff check`, `uv run ruff format --check` y `uv run pytest`. Solo el job de Linux instala la versión de Blender fijada en `.blender-version` y corre los tests marcados `blender`; en macOS y Windows esos tests se saltan.
