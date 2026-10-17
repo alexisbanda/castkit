@@ -6,10 +6,10 @@
 
 ## Stack
 
-- Python 3.12.
+- Python 3.12, con entorno y dependencias gestionados por uv (`pyproject.toml` + `uv.lock`).
 - CadQuery para el modelado paramétrico de la caja de molde.
 - trimesh y manifold3d para el procesamiento y la validación de mallas.
-- Blender en modo headless (scripts `bpy`) para la limpieza avanzada de mallas y los renders.
+- Blender LTS en modo headless (scripts `bpy`) para la limpieza avanzada de mallas y los renders, invocado como subproceso (`blender --background --python …`); el ejecutable se toma de `BLENDER_BIN` o del PATH.
 - Sin base de datos: los diseños viven como carpetas con archivos.
 
 ## Arquitectura
@@ -39,20 +39,20 @@ Las reglas por material y los parámetros de fabricación viven en configuració
 
 ## Cómo se prueba
 
-- `pytest` con mallas de referencia pequeñas en `tests/fixtures/`.
+- `uv run pytest` con mallas de referencia pequeñas en `tests/fixtures/`. Los tests que necesitan Blender llevan la marca `blender` y se saltan si no está disponible.
 - `ruff` para lint y formato.
-- GitHub Actions ejecuta lint y tests en cada PR.
+- GitHub Actions ejecuta lint y tests en cada PR; solo el job de Linux instala Blender y corre los tests marcados `blender`.
 
 ## Entornos y despliegue
 
 - Desarrollo y uso local en los equipos del estudio: Linux, macOS y Windows.
-- CI en GitHub Actions con matriz de los tres sistemas operativos.
+- CI en GitHub Actions con matriz de los tres sistemas operativos (Blender solo en Linux).
 - No hay despliegue a servidores: la herramienta se instala en los equipos del estudio.
 
 ## Decisiones pendientes
 
-- [ ] ¿Qué gestor de entorno y dependencias se usa (uv, pip + venv, conda), teniendo en cuenta que CadQuery y Blender son multiplataforma?
-- [ ] ¿Qué versión de Blender se fija y cómo se ejecuta en la CI (o qué pruebas que lo necesitan quedan fuera de la CI)?
+- [x] ¿Qué gestor de entorno y dependencias se usa? Decidido: uv.
+- [x] ¿Qué versión de Blender se fija y cómo se ejecuta en la CI? Decidido: LTS vigente como subproceso; en CI solo en Linux.
 - [ ] Google Drive: ¿publicación mediante la API o mediante la carpeta sincronizada en el equipo? Si es la API, ¿cómo se guardan las credenciales sin exponerlas?
 - [ ] ¿En qué formato se genera la ficha técnica (Markdown, PDF o ambos) y con qué herramienta?
 - [ ] ¿Cómo se distinguen en la configuración los parámetros por tecnología de impresión (resina MSLA y filamento FDM)?
