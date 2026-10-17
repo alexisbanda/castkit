@@ -18,6 +18,7 @@ from castkit.diseno import (
     crear_diseno,
     validar_nombre,
 )
+from castkit.versiones import VersionError, crear_version, ubicar_diseno
 
 # Orden en el que se piden/validan las opciones del subcomando `alta`.
 _OPCIONES = ("brief", "material", "alto_mm", "cavidades", "cantidad", "fecha", "licencia", "origen")
@@ -70,6 +71,18 @@ def _construir_parser() -> argparse.ArgumentParser:
         "--licencia", default=None, help=f"Licencia del modelo base: {', '.join(LICENCIAS)}."
     )
     alta.add_argument("--origen", default=None, help="Origen del modelo base (texto libre).")
+
+    version = subparsers.add_parser(
+        "version", help="Crea la siguiente versión de un diseño existente."
+    )
+    version.add_argument("nombre", help="Nombre del diseño (minúsculas, números y guiones).")
+    version.add_argument("--motivo", default=None, help="Motivo de la nueva versión (qué cambió).")
+    version.add_argument(
+        "--alto-mm", dest="alto_mm", default=None, help="Nuevo alto en milímetros (opcional)."
+    )
+    version.add_argument(
+        "--cavidades", default=None, help="Nuevo número de cavidades del molde (opcional)."
+    )
 
     return parser
 
@@ -206,6 +219,52 @@ def _ejecutar_alta(args: argparse.Namespace) -> int:
     return 0
 
 
+def _ejecutar_version(args: argparse.Namespace) -> int:
+    # Se valida el nombre y se ubica el diseño ANTES de preguntar nada ni de
+    # tocar `--alto-mm`/`--cavidades`: si el diseño no existe, no se pregunta.
+    try:
+        carpeta = ubicar_diseno(args.nombre)
+    except (AltaError, VersionError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        alto_mm = (
+            _parsear_numero_positivo(args.alto_mm, "--alto-mm")
+            if args.alto_mm is not None
+            else None
+        )
+        cavidades = (
+            _parsear_entero_minimo_uno(args.cavidades, "--cavidades")
+            if args.cavidades is not None
+            else None
+        )
+    except AltaError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    motivo = args.motivo
+    if not motivo:
+        if sys.stdin.isatty():
+            motivo = input("Motivo de la nueva versión: ").strip()
+        else:
+            print(
+                "Error: falta la opción obligatoria --motivo: describe qué cambió en la "
+                "nueva versión.",
+                file=sys.stderr,
+            )
+            return 2
+
+    try:
+        nueva_version = crear_version(carpeta, motivo, alto_mm=alto_mm, cavidades=cavidades)
+    except (AltaError, VersionError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"Versión v{nueva_version} de «{args.nombre}» creada en {carpeta}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Punto de entrada de `castkit`."""
     _configurar_salida_utf8()
@@ -214,6 +273,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.comando == "alta":
         return _ejecutar_alta(args)
+    if args.comando == "version":
+        return _ejecutar_version(args)
 
     parser.print_help(sys.stderr)
     return 2

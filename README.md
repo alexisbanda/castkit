@@ -93,6 +93,51 @@ export CASTKIT_DISENOS=/datos/disenos
 uv run castkit alta guagua-pan --brief ... # se crea en /datos/disenos/guagua-pan
 ```
 
+## Crear una nueva versión de un diseño
+
+`castkit version` crea la siguiente versión de un diseño ya existente, a partir de la versión
+actual: parte de sus parámetros, hereda el alto y las cavidades salvo que indiques nuevos valores,
+y deja constancia del cambio en `CHANGELOG.md`. La versión anterior no se modifica.
+
+```bash
+uv run castkit version guagua-pan --motivo "aumentar altura a 90 mm" --alto-mm 90
+```
+
+Esto, si `guagua-pan` está en `v1`, deja `version_actual: 2` en `diseno.json` y añade a
+`versiones` una entrada `v2` con la fecha de creación, el motivo, el alto y las cavidades
+efectivos (el valor indicado por opción, o el de la versión anterior si no se indicó) y una copia
+independiente de los parámetros de `v1` (modificarlos en `v2` no afecta a `v1`). También agrega a
+`CHANGELOG.md` una entrada `## v2 — AAAA-MM-DD` con el motivo y, si cambiaron, los valores de alto
+o cavidades. No se toca `brief/`, `input/`, `work/`, `output/` ni ninguna versión anterior.
+
+### Opciones
+
+| Opción | Obligatoria | Valores aceptados |
+| --- | --- | --- |
+| `nombre` (posicional) | sí | nombre de un diseño ya dado de alta |
+| `--motivo` | sí | texto libre: qué cambió en esta versión |
+| `--alto-mm` | no | número mayor que 0 (si se omite, se copia el de la versión actual) |
+| `--cavidades` | no | entero mayor o igual a 1 (si se omite, se copia el de la versión actual) |
+
+Un `--alto-mm` o `--cavidades` inválido se rechaza con el mismo mensaje que usa `castkit alta`, y
+no modifica ni `diseno.json` ni `CHANGELOG.md`. Si falta `--motivo` y la terminal es interactiva,
+`castkit` lo pregunta; si no es interactiva, falla pidiendo la opción. Un motivo vacío o de solo
+espacios nunca crea la versión. Si el diseño no existe (o el nombre no es válido), se avisa del
+error y no se pregunta nada.
+
+### Regla para las etapas del pipeline
+
+A partir del ticket #6, cada etapa del pipeline (limpieza, impresión, etc.) sigue dos
+convenciones de `castkit.versiones` para que cada archivo y cada parámetro queden asociados a la
+versión que los produjo:
+
+- **Nombrar archivos** con `nombre_archivo(diseno, version, pieza, ext)`, que genera
+  `<diseño>_v<versión>_<pieza>.<ext>` (p. ej. `nombre_archivo("guagua-pan", 2, "master", "stl")` →
+  `guagua-pan_v2_master.stl`).
+- **Registrar los parámetros usados** con `registrar_parametros(carpeta, etapa, parametros)`, que
+  guarda `parametros` en `versiones.v<actual>.parametros.<etapa>` del `diseno.json`, sin tocar las
+  demás etapas ni otras versiones.
+
 ## Integración continua
 
 GitHub Actions ejecuta en cada pull request y en cada push a `main`, en Linux, macOS y Windows: `uv sync --locked`, `uv run ruff check`, `uv run ruff format --check` y `uv run pytest`. Solo el job de Linux instala la versión de Blender fijada en `.blender-version` y corre los tests marcados `blender`; en macOS y Windows esos tests se saltan.

@@ -210,7 +210,14 @@ def crear_diseno(datos: DatosAlta, destino: Path | None = None) -> Path:
             "fecha_entrega": datos.fecha.isoformat(),
             "modelo_base": {"licencia": datos.licencia, "origen": datos.origen},
             "creado": ahora,
-            "versiones": {"v1": {"creada": ahora, "parametros": {}}},
+            "versiones": {
+                "v1": {
+                    "creada": ahora,
+                    "alto_mm": datos.alto_mm,
+                    "cavidades": datos.cavidades,
+                    "parametros": {},
+                }
+            },
         }
         (tmp_dir / "diseno.json").write_text(
             json.dumps(contenido_json, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
