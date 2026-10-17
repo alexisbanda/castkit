@@ -1,0 +1,37 @@
+[project]
+name = "castkit"
+version = "0.1.0"
+description = "Castkit — Agent-assisted pipeline that turns 3D models into production-ready mold masters and multi-cavity mold boxes for artisan casting."
+readme = "README.md"
+requires-python = "==3.12.*"
+dependencies = [
+    "cadquery>=2.5.2",
+    "trimesh>=4.5.3",
+    "manifold3d>=3.1.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.4",
+    "ruff>=0.8.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/castkit"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "blender: necesita el ejecutable de Blender",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
