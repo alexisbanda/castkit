@@ -54,6 +54,38 @@ def test_rota_fixture_tiene_un_hueco_grande() -> None:
     assert perimetros[0] > 10.0
 
 
+def test_agujeros_grandes_fixture_tiene_huecos_de_mas_de_4_aristas() -> None:
+    """`agujeros_grandes.stl`: un hueco de 6 aristas y uno de 9, ambos chicos
+    (menores a 10 mm de perímetro) pero con más de 4 aristas, así que
+    `trimesh.repair.fill_holes` no los cierra con `use_fan=False` (el valor
+    por defecto, que solo cierra huecos de 3 o 4 aristas) pero sí con
+    `use_fan=True`.
+    """
+    mesh = trimesh.load(FIXTURES_DIR / "agujeros_grandes.stl")
+
+    assert not mesh.is_watertight
+
+    import networkx as nx
+
+    grupos = group_rows(mesh.edges_sorted, require_count=1)
+    borde = mesh.edges[grupos]
+    ciclos = nx.cycle_basis(nx.from_edgelist(borde))
+    tamanos_aristas = sorted(len(ciclo) for ciclo in ciclos)
+    assert tamanos_aristas == [6, 9]
+
+    perimetros = _perimetros_huecos(mesh)
+    assert len(perimetros) == 2
+    assert all(p < 10.0 for p in perimetros)
+
+    sin_fan = mesh.copy()
+    trimesh.repair.fill_holes(sin_fan)
+    assert not sin_fan.is_watertight
+
+    con_fan = mesh.copy()
+    assert trimesh.repair.fill_holes(con_fan, use_fan=True)
+    assert con_fan.is_watertight
+
+
 def test_tumbada_fixture_es_una_caja_asimetrica_cerrada() -> None:
     """`tumbada.stl`: caja cerrada con sus tres dimensiones distintas."""
     mesh = trimesh.load(FIXTURES_DIR / "tumbada.stl")
