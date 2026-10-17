@@ -1,2 +1,8 @@
 .ticket-studio/
 .agent-playbook/
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
