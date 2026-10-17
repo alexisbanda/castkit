@@ -13,7 +13,7 @@ Castkit — Agent-assisted pipeline that turns 3D models into production-ready m
 uv sync
 ```
 
-Esto instala Python 3.12 (si falta) y todas las dependencias del proyecto (CadQuery, trimesh, manifold3d) junto con las de desarrollo (pytest, ruff), siguiendo `pyproject.toml` y `uv.lock`.
+Esto instala Python 3.12 (si falta) y todas las dependencias del proyecto (CadQuery, trimesh, manifold3d, fast-simplification, networkx) junto con las de desarrollo (pytest, ruff), siguiendo `pyproject.toml` y `uv.lock`.
 
 ## Tests
 
@@ -168,6 +168,70 @@ puedan leer como STL (dañados) y STL sin ninguna cara.
 Si la versión actual ya tiene una malla guardada y no se pasa `--reemplazar`: en una terminal
 interactiva se pregunta «¿Reemplazarla? (s/N)» (solo «s», «si» o «sí» reemplazan; cualquier otra
 respuesta no modifica nada); sin terminal, falla indicando que hay que usar `--reemplazar`.
+
+## Limpiar y escalar la malla automáticamente
+
+`castkit limpieza` toma la malla en bruto de la versión actual y deja, en `work/`, una malla
+cerrada (watertight), escalada al `alto_mm` de la versión y con la base recortada y plana en
+z = 0, lista para las siguientes etapas de fabricación:
+
+```bash
+uv run castkit limpieza guagua-pan
+```
+
+Esto, si `guagua-pan` está en `v1`:
+
+1. Busca la malla en bruto más reciente (la de `v1`; si no la tiene, la de la versión anterior
+   más reciente que sí la tenga, avisando en pantalla de cuál se usó).
+2. La orienta según `--arriba` (qué eje debe quedar hacia +Z antes de escalar).
+3. La escala de forma uniforme (conservando las proporciones) para que su altura sea
+   `alto_mm + corte_base_mm`.
+4. Cierra sus zonas abiertas (huecos), siempre que ninguna supere `agujero_max_mm` de
+   perímetro; si alguna lo supera, no cierra nada y falla indicando cuántas zonas hay, su
+   posición y tamaño aproximados (en mm) y los siguientes pasos posibles.
+5. Recorta `corte_base_mm` desde la base (dejando la malla cerrada) y la traslada para que la
+   base quede exactamente en z = 0.
+6. La simplifica a `caras_max` caras como máximo (si ya tiene menos, no la toca).
+7. Arregla las normales y comprueba que el resultado esté cerrado y tenga volumen positivo.
+8. Mide la distancia máxima contra la malla original (orientada, escalada y recortada); si
+   supera `tolerancia_mm`, rechaza el resultado sin escribir ningún archivo.
+
+Si todo sale bien, escribe `guagua-pan/work/guagua-pan_v1_limpia.stl` (nombre generado con
+`nombre_archivo`) y registra, con `registrar_parametros` en `versiones.v1.parametros.limpieza`:
+`caras_max`, `tolerancia_mm`, `corte_base_mm`, `agujero_max_mm`, `arriba`, la versión de la que
+salió la malla en bruto (`version_bruto`), su huella `sha256`, las caras resultantes (`caras`) y
+la distancia máxima medida (`distancia_max_mm`). Volver a limpiar la misma versión reemplaza el
+archivo y el registro, avisando en pantalla.
+
+### Opciones
+
+| Opción | Obligatoria | Valores aceptados |
+| --- | --- | --- |
+| `nombre` (posicional) | sí | nombre de un diseño ya dado de alta |
+| `--arriba` | no | `x`, `-x`, `y`, `-y`, `z` (por defecto), `-z`: eje que debe quedar hacia +Z |
+| `--caras-max` | no | entero mayor o igual a 1 (si se omite, se usa `config/fabricacion.toml`) |
+| `--tolerancia-mm` | no | número mayor que 0 (si se omite, se usa `config/fabricacion.toml`) |
+| `--corte-base-mm` | no | número mayor que 0 (si se omite, se usa `config/fabricacion.toml`) |
+| `--agujero-max-mm` | no | número mayor que 0 (si se omite, se usa `config/fabricacion.toml`) |
+
+Un valor inválido en cualquiera de estas opciones se rechaza con un mensaje en español que
+nombra la opción.
+
+### `config/fabricacion.toml`
+
+Los valores de partida de `caras_max`, `tolerancia_mm`, `corte_base_mm` y `agujero_max_mm` viven,
+versionados en el repositorio, en la sección `[limpieza]` de `config/fabricacion.toml`:
+
+```toml
+[limpieza]
+caras_max = 200000
+tolerancia_mm = 0.2
+corte_base_mm = 0.5
+agujero_max_mm = 10
+```
+
+Cada opción de `castkit limpieza` sobrescribe, una a una, el valor correspondiente de aquí; las
+demás se siguen leyendo de la configuración.
 
 ## Integración continua
 

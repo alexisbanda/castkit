@@ -143,7 +143,9 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "cadquery" },
+    { name = "fast-simplification" },
     { name = "manifold3d" },
+    { name = "networkx" },
     { name = "trimesh" },
 ]
 
@@ -156,7 +158,9 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "cadquery", specifier = ">=2.5.2" },
+    { name = "fast-simplification", specifier = ">=0.2.0" },
     { name = "manifold3d", specifier = ">=3.1.1" },
+    { name = "networkx", specifier = ">=3.7" },
     { name = "trimesh", specifier = ">=4.5.3" },
 ]
 
@@ -227,6 +231,22 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/1b/58/9d3b7f6c5d6f5669bb4c0d470367518fdfbe85a4fede4f18a94f09c9555a/ezdxf-1.4.5-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:00910275480cb6eaa93b3fa77750c97df10c872f66d0bab6733d7d62f0c65169", size = 6287356, upload-time = "2026-10-16T11:45:43.724Z" },
     { url = "https://files.pythonhosted.org/packages/15/70/20c5e40264bf395a0f605dc97c4971339d711867aee383f49f9d9da10e27/ezdxf-1.4.5-cp312-cp312-win_amd64.whl", hash = "sha256:ff7e9fe0e7367e6f07c99b894d03e362c5e3b94dea0760f1f1ecb5bfd8cccb5d", size = 3053582, upload-time = "2026-10-16T11:39:14.613Z" },
     { url = "https://files.pythonhosted.org/packages/fb/d7/9f420747a1edf562cabff228f8d1f7a16530ad021ea6f84c775ca15dec9b/ezdxf-1.4.5-py3-none-any.whl", hash = "sha256:70a79ec7d40990f60453e3c87ffe9f668907ee061cf6f4c0a3794d032ec2b40e", size = 1333303, upload-time = "2026-10-16T11:35:43.49Z" },
+]
+
+[[package]]
+name = "fast-simplification"
+version = "0.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f3/0a/b943887803aefecd01d30cd150bd2a6f03d90b96886e3befdcc5d4276c98/fast_simplification-0.2.0.tar.gz", hash = "sha256:ed02ea6f4968ec98f963f2d3665dbafd0297ec12aea9e4d0a87c4b3c14d608a8", size = 31865, upload-time = "2026-08-12T19:53:50.49Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1b/7c/52ca18d3c8b2b22ec1b70582ba48d4596c5a1fc79a8a22cccdb19bf40249/fast_simplification-0.2.0-cp312-cp312-macosx_10_14_x86_64.whl", hash = "sha256:5315899a8ee1d6fdf959997e55711a866ed0996ef1be09e905d7917272ba7fc3", size = 155243, upload-time = "2026-08-12T19:53:31.079Z" },
+    { url = "https://files.pythonhosted.org/packages/2b/ca/a79667eafa57a93385073549b4ce89c175e44481543709b32c4be504731a/fast_simplification-0.2.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:e394a1cca801a3aa00d54a79206e32f22afe44099fbf9f7b52f2937c19464bf1", size = 148463, upload-time = "2026-08-12T19:53:32.963Z" },
+    { url = "https://files.pythonhosted.org/packages/e6/d8/858d63ac701ed90aba0b99941de961f8ee15be254c33dd43382895d28a08/fast_simplification-0.2.0-cp312-cp312-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:15c844cb7d3b6ab0408ff0dc5f31d1264254d0d335a3149e55e9b377ff3615bd", size = 274348, upload-time = "2026-08-12T19:53:34.504Z" },
+    { url = "https://files.pythonhosted.org/packages/3a/3e/27802de2a242b6e97716c6f42a708310e1309bba823ea685891d553b6846/fast_simplification-0.2.0-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:fd0d9657902a47c04c9a837257de9cc8020b002e894c5ce26e7b424857af4f76", size = 286806, upload-time = "2026-08-12T19:53:35.763Z" },
+    { url = "https://files.pythonhosted.org/packages/24/94/7f74a1e687e3560163200d071036816712d2d6ab8a083b5f22af84f23012/fast_simplification-0.2.0-cp312-cp312-win_amd64.whl", hash = "sha256:ce22a6f015707eb1d6d431c4896a18eb15c5f3cbaf32533d90371ea1b06875ad", size = 343492, upload-time = "2026-08-12T19:53:36.938Z" },
 ]
 
 [[package]]
@@ -436,6 +456,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/ed/f3/930a6dc1d35b2ab65faffa2a75bbcc67f12d8227857188273783df4e5134/multimethod-1.12.tar.gz", hash = "sha256:8db8ef2a8d2a247e3570cc23317680892fdf903d84c8c1053667c8e8f7671a67", size = 17423, upload-time = "2024-07-04T16:10:08.179Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/af/98/cff14d53a2f2f67d7fe8a4e235a383ee71aba6a1da12aeea24b325d0c72a/multimethod-1.12-py3-none-any.whl", hash = "sha256:fd0c473c43558908d97cc06e4d68e8f69202f167db46f7b4e4058893e7dbdf60", size = 10646, upload-time = "2024-07-04T16:10:06.482Z" },
+]
+
+[[package]]
+name = "networkx"
+version = "3.7"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/dc/76/3af777226b63a5e64a6b36b1ec5855c14e2b94a37096d4760e595fc43511/networkx-3.7.tar.gz", hash = "sha256:fd77a511bd90f39f3d016351345b52cf5319b813bdca01de3f755d3cca62e96a", size = 1866482, upload-time = "2026-09-21T16:45:16.974Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7e/cd/fe58041e9011f307c490e3e17dd48cc516448f7c698a3f2d9d9d65d7e6a8/networkx-3.7-py3-none-any.whl", hash = "sha256:e3fd2c13a7814cee3746340d8d7f8598a67f16a58bf47fb7f8793fab6efca1b0", size = 2142205, upload-time = "2026-09-21T16:45:14.609Z" },
 ]
 
 [[package]]
