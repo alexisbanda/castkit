@@ -18,7 +18,14 @@ from castkit.diseno import (
     crear_diseno,
     validar_nombre,
 )
-from castkit.versiones import VersionError, crear_version, ubicar_diseno
+from castkit.ingesta import IngestaError, ingerir_malla, validar_malla
+from castkit.versiones import (
+    VersionError,
+    cargar_diseno,
+    crear_version,
+    nombre_archivo,
+    ubicar_diseno,
+)
 
 # Orden en el que se piden/validan las opciones del subcomando `alta`.
 _OPCIONES = ("brief", "material", "alto_mm", "cavidades", "cantidad", "fecha", "licencia", "origen")
@@ -84,6 +91,17 @@ def _construir_parser() -> argparse.ArgumentParser:
         "--cavidades", default=None, help="Nuevo número de cavidades del molde (opcional)."
     )
 
+    ingesta = subparsers.add_parser(
+        "ingesta", help="Incorpora la malla en bruto de la versión actual de un diseño."
+    )
+    ingesta.add_argument("nombre", help="Nombre del diseño (minúsculas, números y guiones).")
+    ingesta.add_argument("archivo", help="Ruta al archivo STL con la malla en bruto.")
+    ingesta.add_argument(
+        "--reemplazar",
+        action="store_true",
+        help="Reemplaza sin preguntar la malla ya guardada en la versión actual, si existe.",
+    )
+
     return parser
 
 
@@ -139,12 +157,12 @@ def _pedir_opciones_faltantes(valores: dict[str, str | None]) -> list[str]:
     return [clave for clave in _OPCIONES if not valores[clave]]
 
 
-def _limpiar_ruta_brief(valor: str) -> str:
-    """Normaliza una ruta de brief recibida por opción o por respuesta interactiva.
+def _limpiar_ruta(valor: str) -> str:
+    """Normaliza una ruta (de brief o de archivo) recibida por opción o interactivamente.
 
-    Quita las comillas simples o dobles que la envuelvan (arrastrar una
-    carpeta a la terminal suele añadirlas) y expande ``~`` a la carpeta
-    personal antes de validar la ruta.
+    Quita las comillas simples o dobles que la envuelvan (arrastrar un
+    archivo o una carpeta a la terminal suele añadirlas) y expande ``~`` a la
+    carpeta personal antes de validar la ruta.
     """
     valor = valor.strip()
     if len(valor) >= 2 and valor[0] == valor[-1] and valor[0] in ("'", '"'):
@@ -197,7 +215,7 @@ def _ejecutar_alta(args: argparse.Namespace) -> int:
         cavidades = _parsear_entero_minimo_uno(valores["cavidades"], "--cavidades")
         cantidad = _parsear_entero_minimo_uno(valores["cantidad"], "--cantidad")
         fecha = _parsear_fecha(valores["fecha"])
-        brief = _limpiar_ruta_brief(valores["brief"])
+        brief = _limpiar_ruta(valores["brief"])
 
         datos = DatosAlta(
             nombre=args.nombre,
@@ -265,6 +283,62 @@ def _ejecutar_version(args: argparse.Namespace) -> int:
     return 0
 
 
+def _ejecutar_ingesta(args: argparse.Namespace) -> int:
+    # Se ubica el diseño ANTES de limpiar la ruta o validar el archivo: si el
+    # diseño no existe, no se toca el archivo ni se pregunta nada.
+    try:
+        carpeta = ubicar_diseno(args.nombre)
+    except (AltaError, VersionError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    archivo = Path(_limpiar_ruta(args.archivo))
+
+    try:
+        info = validar_malla(archivo)
+    except (AltaError, VersionError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    datos = cargar_diseno(carpeta)
+    version_actual = datos["version_actual"]
+    nombre_destino = nombre_archivo(datos["nombre"], version_actual, "bruto", "stl")
+    destino = carpeta / "input" / nombre_destino
+
+    reemplazar = args.reemplazar
+    if destino.exists() and not reemplazar:
+        if sys.stdin.isatty():
+            respuesta = (
+                input(f"Esta versión ya tiene una malla ({nombre_destino}). ¿Reemplazarla? (s/N): ")
+                .strip()
+                .lower()
+            )
+            if respuesta in ("s", "si", "sí"):
+                reemplazar = True
+            else:
+                print("No se ha modificado nada.", file=sys.stderr)
+                return 1
+        else:
+            print(
+                f"Error: la versión v{version_actual} de «{args.nombre}» ya tiene una malla "
+                f"guardada; usa --reemplazar para sustituirla.",
+                file=sys.stderr,
+            )
+            return 2
+
+    try:
+        destino_final = ingerir_malla(carpeta, archivo, reemplazar=reemplazar)
+    except (AltaError, VersionError, IngestaError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    print(
+        f"Malla de «{args.nombre}» guardada en {destino_final} "
+        f"({info['caras']} caras, {info['vertices']} vértices)."
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Punto de entrada de `castkit`."""
     _configurar_salida_utf8()
@@ -275,6 +349,8 @@ def main(argv: list[str] | None = None) -> int:
         return _ejecutar_alta(args)
     if args.comando == "version":
         return _ejecutar_version(args)
+    if args.comando == "ingesta":
+        return _ejecutar_ingesta(args)
 
     parser.print_help(sys.stderr)
     return 2
