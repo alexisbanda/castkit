@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "tracker": {"type": "github", "repo": "alexisbanda/castkit"},
+  "tech_lead": "alexisbanda",
+  "auto_ready": true,
+  "agent_playbook": true,
+  "language": "es"
+}
