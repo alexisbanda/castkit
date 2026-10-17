@@ -1,0 +1,30 @@
+{
+  "$schema": "https://raw.githubusercontent.com/alexisbanda/agent-playbook/main/config/agent-playbook.schema.json",
+  "version": 1,
+  "profile": "reduced",
+  "tracker": {
+    "type": "github",
+    "github": {
+      "repo": "alexisbanda/castkit",
+      "in_progress_label": "in-progress"
+    }
+  },
+  "tickets": {
+    "contract": true,
+    "ready_label": "ready"
+  },
+  "hooks": {
+    "mode": "warn",
+    "production_patterns": []
+  },
+  "review_bot": {
+    "enabled": false
+  },
+  "environment": {
+    "dev_url": "",
+    "test_command": "uv run pytest",
+    "worktree_test_command": "",
+    "deploy_check": ""
+  },
+  "journeys": []
+}
