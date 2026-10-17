@@ -4,11 +4,20 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import math
 import sys
 from datetime import date
 from pathlib import Path
 
-from castkit.diseno import LICENCIAS, MATERIALES, AltaError, DatosAlta, crear_diseno
+from castkit.diseno import (
+    LICENCIAS,
+    MATERIALES,
+    AltaError,
+    DatosAlta,
+    carpeta_disenos,
+    crear_diseno,
+    validar_nombre,
+)
 
 # Orden en el que se piden/validan las opciones del subcomando `alta`.
 _OPCIONES = ("brief", "material", "alto_mm", "cavidades", "cantidad", "fecha", "licencia", "origen")
@@ -79,7 +88,7 @@ def _parsear_numero_positivo(valor: str, opcion: str) -> float:
         numero = float(valor)
     except ValueError as exc:
         raise AltaError(f'{opcion} debe ser un número mayor que 0; recibido "{valor}".') from exc
-    if numero <= 0:
+    if not math.isfinite(numero) or numero <= 0:
         raise AltaError(f'{opcion} debe ser un número mayor que 0; recibido "{valor}".')
     return numero
 
@@ -108,15 +117,43 @@ def _validar_eleccion(valor: str, opcion: str, aceptados: tuple[str, ...]) -> st
 def _pedir_opciones_faltantes(valores: dict[str, str | None]) -> list[str]:
     """Pregunta por cada opción vacía en ``valores`` y la actualiza en el sitio.
 
-    Devuelve la lista de opciones que, tras preguntar, sigan vacías.
+    Cada respuesta se limpia con ``.strip()``. Devuelve la lista de opciones
+    que, tras preguntar, sigan vacías.
     """
     for clave in _OPCIONES:
         if not valores[clave]:
-            valores[clave] = input(_PREGUNTAS[clave])
+            valores[clave] = input(_PREGUNTAS[clave]).strip()
     return [clave for clave in _OPCIONES if not valores[clave]]
 
 
+def _limpiar_ruta_brief(valor: str) -> str:
+    """Normaliza una ruta de brief recibida por opción o por respuesta interactiva.
+
+    Quita las comillas simples o dobles que la envuelvan (arrastrar una
+    carpeta a la terminal suele añadirlas) y expande ``~`` a la carpeta
+    personal antes de validar la ruta.
+    """
+    valor = valor.strip()
+    if len(valor) >= 2 and valor[0] == valor[-1] and valor[0] in ("'", '"'):
+        valor = valor[1:-1].strip()
+    return str(Path(valor).expanduser())
+
+
 def _ejecutar_alta(args: argparse.Namespace) -> int:
+    # Se valida el nombre, la carpeta de diseños y que el diseño no exista ya
+    # ANTES de detectar opciones faltantes: si algo de esto falla, no se
+    # pregunta nada.
+    try:
+        validar_nombre(args.nombre)
+        destino = carpeta_disenos()
+        if (destino / args.nombre).exists():
+            raise AltaError(
+                f'El diseño "{args.nombre}" ya existe en {destino}; no se ha modificado nada.'
+            )
+    except AltaError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
     valores: dict[str, str | None] = {
         "brief": args.brief,
         "material": args.material,
@@ -147,10 +184,11 @@ def _ejecutar_alta(args: argparse.Namespace) -> int:
         cavidades = _parsear_entero_minimo_uno(valores["cavidades"], "--cavidades")
         cantidad = _parsear_entero_minimo_uno(valores["cantidad"], "--cantidad")
         fecha = _parsear_fecha(valores["fecha"])
+        brief = _limpiar_ruta_brief(valores["brief"])
 
         datos = DatosAlta(
             nombre=args.nombre,
-            brief=Path(valores["brief"]),
+            brief=Path(brief),
             material=material,
             alto_mm=alto_mm,
             cavidades=cavidades,
@@ -159,7 +197,7 @@ def _ejecutar_alta(args: argparse.Namespace) -> int:
             licencia=licencia,
             origen=valores["origen"],
         )
-        ruta = crear_diseno(datos)
+        ruta = crear_diseno(datos, destino=destino)
     except AltaError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1

@@ -45,7 +45,10 @@ def _argv(
     argv = ["alta", nombre]
     for clave, valor in valores.items():
         if valor is not None:
-            argv.extend([OPCION_A_FLAG[clave], str(valor)])
+            # Se usa `--opcion=valor` (en vez de dos argumentos separados) para que
+            # valores que empiezan con "-" (p. ej. "-inf") no se confundan con otra
+            # opción.
+            argv.append(f"{OPCION_A_FLAG[clave]}={valor}")
     return argv
 
 
@@ -78,6 +81,20 @@ def destino(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.chdir(carpeta)
     monkeypatch.delenv("CASTKIT_DISENOS", raising=False)
     return carpeta
+
+
+def _activar_stdin_interactivo(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Simula una terminal interactiva (``sys.stdin.isatty()`` devuelve True)."""
+
+    class _StdinInteractivo:
+        def isatty(self) -> bool:
+            return True
+
+    monkeypatch.setattr("sys.stdin", _StdinInteractivo())
+
+
+def _input_que_no_debe_llamarse(prompt: str = "") -> str:
+    raise AssertionError(f"No debería preguntarse nada; se preguntó: {prompt!r}")
 
 
 def test_alta_completa_crea_la_estructura_estandar(
@@ -197,6 +214,64 @@ def test_castkit_disenos_inexistente_falla_sin_crear_nada(
     assert not (otra_cwd / "guagua-pan").exists()
 
 
+def test_nombre_invalido_en_modo_interactivo_no_pregunta_nada(
+    destino: Path,
+    brief_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _activar_stdin_interactivo(monkeypatch)
+    monkeypatch.setattr("builtins.input", _input_que_no_debe_llamarse)
+
+    codigo = main(_argv(nombre="Guagua de Pan", brief=str(brief_dir)))
+
+    assert codigo != 0
+    error = capsys.readouterr().err
+    assert "Guagua de Pan" in error
+    assert list(destino.iterdir()) == []
+
+
+def test_diseno_existente_en_modo_interactivo_no_pregunta_nada(
+    destino: Path,
+    brief_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main(_argv(brief=str(brief_dir))) == 0
+
+    _activar_stdin_interactivo(monkeypatch)
+    monkeypatch.setattr("builtins.input", _input_que_no_debe_llamarse)
+
+    codigo = main(_argv(brief=str(brief_dir), origen="otro origen"))
+
+    assert codigo != 0
+    error = capsys.readouterr().err
+    assert "ya existe" in error
+
+
+def test_castkit_disenos_inexistente_en_modo_interactivo_no_pregunta_nada(
+    tmp_path: Path,
+    brief_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    carpeta_inexistente = tmp_path / "no-existe" / "disenos"
+    monkeypatch.setenv("CASTKIT_DISENOS", str(carpeta_inexistente))
+    otra_cwd = tmp_path / "cwd-interactivo"
+    otra_cwd.mkdir()
+    monkeypatch.chdir(otra_cwd)
+
+    _activar_stdin_interactivo(monkeypatch)
+    monkeypatch.setattr("builtins.input", _input_que_no_debe_llamarse)
+
+    codigo = main(_argv(brief=str(brief_dir)))
+
+    assert codigo != 0
+    error = capsys.readouterr().err
+    assert "CASTKIT_DISENOS" in error
+    assert not (otra_cwd / "guagua-pan").exists()
+
+
 @pytest.mark.parametrize(
     ("nombre_crudo", "propuesta_esperada"),
     [
@@ -229,6 +304,9 @@ def test_nombre_invalido_se_rechaza_con_propuesta(
         ({"alto_mm": "0"}, "--alto-mm"),
         ({"alto_mm": "-5"}, "--alto-mm"),
         ({"alto_mm": "abc"}, "--alto-mm"),
+        ({"alto_mm": "nan"}, "--alto-mm"),
+        ({"alto_mm": "inf"}, "--alto-mm"),
+        ({"alto_mm": "-inf"}, "--alto-mm"),
         ({"cavidades": "0"}, "--cavidades"),
         ({"cavidades": "1.5"}, "--cavidades"),
         ({"cantidad": "0"}, "--cantidad"),
@@ -355,3 +433,50 @@ def test_alta_duplicada_no_modifica_y_avisa(
     assert marca.read_text(encoding="utf-8") == contenido_original
     # Nada de carpetas temporales sueltas.
     assert sorted(p.name for p in destino.iterdir()) == ["guagua-pan"]
+
+
+def test_respuesta_interactiva_se_limpia_con_strip(
+    destino: Path, brief_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _activar_stdin_interactivo(monkeypatch)
+
+    def _input_falso(prompt: str = "") -> str:
+        if "Licencia" in prompt:
+            return " propio "
+        if "Origen" in prompt:
+            return "escultura propia en Nomad"
+        raise AssertionError(f"Pregunta inesperada: {prompt}")
+
+    monkeypatch.setattr("builtins.input", _input_falso)
+
+    codigo = main(_argv(brief=str(brief_dir), licencia=None, origen=None))
+
+    assert codigo == 0
+    assert (destino / "guagua-pan").is_dir()
+
+
+def test_respuesta_interactiva_de_brief_limpia_comillas_y_expande_home(
+    destino: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    carpeta_home = tmp_path / "home-falso"
+    carpeta_home.mkdir()
+    brief_en_home = carpeta_home / "brief"
+    brief_en_home.mkdir()
+    (brief_en_home / "especificacion.txt").write_text("Brief en home.\n", encoding="utf-8")
+
+    monkeypatch.setenv("HOME", str(carpeta_home))
+    monkeypatch.setenv("USERPROFILE", str(carpeta_home))
+
+    _activar_stdin_interactivo(monkeypatch)
+
+    def _input_falso(prompt: str = "") -> str:
+        if "brief" in prompt.lower():
+            return "'~/brief'"
+        raise AssertionError(f"Pregunta inesperada: {prompt}")
+
+    monkeypatch.setattr("builtins.input", _input_falso)
+
+    codigo = main(_argv(brief=None))
+
+    assert codigo == 0
+    assert (destino / "guagua-pan" / "brief" / "especificacion.txt").is_file()

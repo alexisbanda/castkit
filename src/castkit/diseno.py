@@ -10,6 +10,7 @@ que añadirá entradas a ``versiones`` con los parámetros usados en cada una.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import shutil
@@ -126,7 +127,7 @@ class DatosAlta:
 
         if isinstance(self.alto_mm, bool) or not isinstance(self.alto_mm, (int, float)):
             raise AltaError(f'--alto-mm debe ser un número mayor que 0; recibido "{self.alto_mm}".')
-        if self.alto_mm <= 0:
+        if not math.isfinite(self.alto_mm) or self.alto_mm <= 0:
             raise AltaError(f'--alto-mm debe ser un número mayor que 0; recibido "{self.alto_mm}".')
 
         if isinstance(self.cavidades, bool) or not isinstance(self.cavidades, int):
