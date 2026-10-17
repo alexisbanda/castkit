@@ -269,6 +269,161 @@ class ProveedorTripo3D:
         raise GeneracionError('Tiempo de espera agotado esperando al proveedor "tripo3d".')
 
 
+class ProveedorImagen3D:
+    """Proveedor local que reconstruye un volumen 3D cerrado a partir de una imagen 2D.
+
+    Segmenta la silueta de la figura respecto al fondo, calcula la transformada
+    de distancia euclidiana y el mapa de luminancia para dar relieve volumétrico
+    suave a ambos lados, y exporta un STL cerrado (`watertight`) listo para
+    `castkit limpieza`.
+    """
+
+    def __init__(self, resolucion: int = 160) -> None:
+        self.resolucion = max(32, int(resolucion))
+
+    def generar(self, insumos: InsumosBrief, destino_stl: Path) -> None:
+        if not insumos.imagenes:
+            raise GeneracionError(
+                'El proveedor "imagen-3d" requiere al menos una imagen (.png, .jpg, .webp) '
+                "en la carpeta brief/."
+            )
+
+        import numpy as np
+        from PIL import Image
+        from scipy import ndimage
+
+        ruta_img = insumos.imagenes[0]
+        try:
+            im = Image.open(ruta_img).convert("RGBA")
+        except Exception as exc:
+            raise GeneracionError(
+                f'No se pudo abrir la imagen de referencia "{ruta_img.name}": {exc}'
+            ) from exc
+
+        arr = np.asarray(im, dtype=np.float32)
+        rgb = arr[..., :3]
+        alpha = arr[..., 3]
+
+        bordes = np.vstack([rgb[0, :], rgb[-1, :], rgb[:, 0], rgb[:, -1]])
+        bg = np.median(bordes, axis=0)
+        dist_bg = np.linalg.norm(rgb - bg, axis=-1)
+        fg_raw = (dist_bg > 22.0) & (alpha > 128)
+        if not fg_raw.any():
+            fg_raw = alpha > 128
+        if not fg_raw.any():
+            fg_raw = np.ones(rgb.shape[:2], dtype=bool)
+
+        etiquetas, n_comp = ndimage.label(fg_raw)
+        if n_comp > 1:
+            tamanos = ndimage.sum(fg_raw, etiquetas, range(1, n_comp + 1))
+            mayor = int(np.argmax(tamanos)) + 1
+            mask_full = etiquetas == mayor
+        else:
+            mask_full = fg_raw
+
+        ys, xs = np.where(mask_full)
+        y0, y1 = int(ys.min()), int(ys.max())
+        x0, x1 = int(xs.min()), int(xs.max())
+
+        h_crop, w_crop = y1 - y0 + 1, x1 - x0 + 1
+        escala = self.resolucion / max(h_crop, w_crop)
+        nh = max(16, int(round(h_crop * escala)))
+        nw = max(16, int(round(w_crop * escala)))
+
+        mask_img = Image.fromarray((mask_full[y0 : y1 + 1, x0 : x1 + 1] * 255).astype(np.uint8))
+        mask_small = np.asarray(mask_img.resize((nw, nh), Image.Resampling.BILINEAR)) > 127
+        lbls, n_lbl = ndimage.label(mask_small)
+        if n_lbl > 1:
+            sz = ndimage.sum(mask_small, lbls, range(1, n_lbl + 1))
+            mask_small = lbls == (int(np.argmax(sz)) + 1)
+
+        rgb_crop = Image.fromarray(rgb[y0 : y1 + 1, x0 : x1 + 1].astype(np.uint8)).resize(
+            (nw, nh), Image.Resampling.BILINEAR
+        )
+        rgb_small = np.asarray(rgb_crop, dtype=np.float32) / 255.0
+        luma = 0.299 * rgb_small[..., 0] + 0.587 * rgb_small[..., 1] + 0.114 * rgb_small[..., 2]
+
+        mask = np.pad(mask_small, 1, mode="constant", constant_values=False)
+        luma = np.pad(luma, 1, mode="edge")
+        alto_g, ancho_g = mask.shape
+
+        mask_filled = ndimage.binary_fill_holes(mask)
+        dist_hull = ndimage.distance_transform_edt(mask_filled)
+        dist_local = ndimage.distance_transform_edt(mask)
+        dist_hull_norm = dist_hull / max(float(dist_hull.max()), 1.0)
+        dist_local_norm = dist_local / max(float(dist_local.max()), 1.0)
+
+        cell_thickness = (
+            0.55 * np.power(dist_hull_norm, 0.55)
+            + 0.30 * np.power(dist_local_norm, 0.5)
+            + 0.15 * ndimage.gaussian_filter(luma, sigma=1.0)
+        )
+        cell_thickness = ndimage.gaussian_filter(cell_thickness, sigma=1.2)
+
+        v_thick = np.zeros((alto_g + 1, ancho_g + 1), dtype=np.float64)
+        v_count = np.zeros((alto_g + 1, ancho_g + 1), dtype=np.float64)
+        for dr in (0, 1):
+            for dc in (0, 1):
+                v_thick[dr : alto_g + dr, dc : ancho_g + dc] += np.where(mask, cell_thickness, 0.0)
+                v_count[dr : alto_g + dr, dc : ancho_g + dc] += mask.astype(np.float64)
+
+        active_v = v_count > 0
+        v_thick[active_v] = v_thick[active_v] / v_count[active_v]
+        max_dim = float(max(alto_g, ancho_g))
+        half_depth = 1.2 + v_thick * (0.20 * max_dim)
+
+        front_idx = -np.ones((alto_g + 1, ancho_g + 1), dtype=np.int64)
+        back_idx = -np.ones((alto_g + 1, ancho_g + 1), dtype=np.int64)
+        verts: list[list[float]] = []
+        for r in range(alto_g + 1):
+            for c in range(ancho_g + 1):
+                if active_v[r, c]:
+                    x = float(c)
+                    z = float(alto_g - r)
+                    d = float(half_depth[r, c])
+                    front_idx[r, c] = len(verts)
+                    verts.append([x, -d, z])
+                    back_idx[r, c] = len(verts)
+                    verts.append([x, +d, z])
+
+        faces: list[list[int]] = []
+        for r in range(alto_g):
+            for c in range(ancho_g):
+                if not mask[r, c]:
+                    continue
+                f00 = int(front_idx[r, c])
+                f10 = int(front_idx[r + 1, c])
+                f11 = int(front_idx[r + 1, c + 1])
+                f01 = int(front_idx[r, c + 1])
+                faces.append([f00, f10, f11])
+                faces.append([f00, f11, f01])
+
+                b00 = int(back_idx[r, c])
+                b10 = int(back_idx[r + 1, c])
+                b11 = int(back_idx[r + 1, c + 1])
+                b01 = int(back_idx[r, c + 1])
+                faces.append([b00, b11, b10])
+                faces.append([b00, b01, b11])
+
+                if not mask[r - 1, c]:
+                    faces.append([f00, f01, b01])
+                    faces.append([f00, b01, b00])
+                if not mask[r + 1, c]:
+                    faces.append([f11, f10, b10])
+                    faces.append([f11, b10, b11])
+                if not mask[r, c - 1]:
+                    faces.append([f10, f00, b00])
+                    faces.append([f10, b00, b10])
+                if not mask[r, c + 1]:
+                    faces.append([f01, f11, b11])
+                    faces.append([f01, b11, b01])
+
+        malla = trimesh.Trimesh(vertices=np.asarray(verts), faces=np.asarray(faces), process=True)
+        trimesh.smoothing.filter_taubin(malla, iterations=5)
+        trimesh.repair.fix_normals(malla)
+        malla.export(destino_stl, file_type="stl")
+
+
 class ProveedorComando:
     """Proveedor enchufable que ejecuta un comando o script externo configurable.
 
@@ -278,6 +433,9 @@ class ProveedorComando:
     - Variable `CASTKIT_INSUMOS`: rutas de imágenes y documentos separadas por
       `:` (o `;` en Windows).
     - Variable `CASTKIT_PROMPT`: texto de contexto combinado del brief.
+
+    Si `comando` está vacío pero el brief incluye imágenes, delega en el
+    reconstructor volumétrico local (:class:`ProveedorImagen3D`).
     """
 
     def __init__(self, comando: str) -> None:
@@ -285,6 +443,9 @@ class ProveedorComando:
 
     def generar(self, insumos: InsumosBrief, destino_stl: Path) -> None:
         if not self.comando:
+            if insumos.imagenes:
+                ProveedorImagen3D().generar(insumos, destino_stl)
+                return
             raise GeneracionError(
                 'El proveedor "comando" no tiene ningún comando configurado en la sección '
                 "[generacion] de config/fabricacion.toml."
@@ -338,7 +499,7 @@ def obtener_proveedor(
     """Devuelve la instancia del proveedor ``nombre``.
 
     Busca primero en los proveedores registrados con :func:`registrar_proveedor`
-    y luego en los proveedores integrados (`"comando"`, `"fal"`, `"tripo3d"`).
+    y luego en los proveedores integrados (`"comando"`, `"imagen-3d"`, `"fal"`, `"tripo3d"`).
     Lanza :class:`GeneracionError` si el nombre no corresponde a ningún proveedor.
     """
     if nombre in _PROVEEDORES_REGISTRADOS:
@@ -347,12 +508,16 @@ def obtener_proveedor(
     if nombre == "comando":
         comando = (config_generacion or {}).get("comando", "")
         return ProveedorComando(str(comando))
+    if nombre == "imagen-3d":
+        return ProveedorImagen3D()
     if nombre == "fal":
         return ProveedorFal()
     if nombre == "tripo3d":
         return ProveedorTripo3D()
 
-    disponibles = sorted({"comando", "fal", "tripo3d", *_PROVEEDORES_REGISTRADOS.keys()})
+    disponibles = sorted(
+        {"comando", "imagen-3d", "fal", "tripo3d", *_PROVEEDORES_REGISTRADOS.keys()}
+    )
     raise GeneracionError(
         f'El proveedor de generación 3D "{nombre}" no está registrado. '
         f"Proveedores disponibles: {', '.join(disponibles)}."
