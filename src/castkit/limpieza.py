@@ -306,6 +306,41 @@ def _distancia_maxima(
     return float(max(distancia_ref.max(), distancia_limpia.max()))
 
 
+_SCRIPT_REMESH_BLENDER = Path(__file__).parent / "blender_scripts" / "remesh_voxel.py"
+
+
+def _remallar_con_blender(malla: trimesh.Trimesh, voxel_mm: float) -> trimesh.Trimesh:
+    """Ejecuta el remallado por vóxeles de Blender en modo headless sobre ``malla``."""
+    import os
+    import tempfile
+
+    from castkit.blender import run_blender_script
+
+    fd_in, ruta_in_str = tempfile.mkstemp(prefix=".castkit-remesh-in-", suffix=".stl")
+    os.close(fd_in)
+    fd_out, ruta_out_str = tempfile.mkstemp(prefix=".castkit-remesh-out-", suffix=".stl")
+    os.close(fd_out)
+    ruta_in = Path(ruta_in_str)
+    ruta_out = Path(ruta_out_str)
+    ruta_out.unlink(missing_ok=True)
+
+    try:
+        malla.export(ruta_in, file_type="stl")
+        run_blender_script(_SCRIPT_REMESH_BLENDER, str(ruta_in), str(ruta_out), str(voxel_mm))
+        if not ruta_out.is_file():
+            raise LimpiezaError("Blender no generó ningún archivo STL tras el remallado.")
+        remallada = trimesh.load(ruta_out, file_type="stl", force="mesh")
+        trimesh.repair.fix_normals(remallada)
+        return remallada
+    except Exception as exc:
+        if isinstance(exc, LimpiezaError):
+            raise
+        raise LimpiezaError(f"El remallado de respaldo con Blender falló: {exc}") from exc
+    finally:
+        ruta_in.unlink(missing_ok=True)
+        ruta_out.unlink(missing_ok=True)
+
+
 def limpiar_malla(
     carpeta: Path,
     *,
@@ -314,22 +349,17 @@ def limpiar_malla(
     tolerancia_mm: float,
     corte_base_mm: float,
     agujero_max_mm: float,
+    voxel_mm: float = 0.3,
+    sin_blender: bool = False,
 ) -> dict[str, Any]:
     """Limpia y escala la malla en bruto de la versión actual del diseño en ``carpeta``.
 
-    Ver el resumen de pasos en el docstring del módulo. Escribe la malla
-    limpia en
-    ``carpeta/work/<nombre_archivo(diseno, version_actual, "limpia", "stl")>``
-    y registra los parámetros usados con :func:`registrar_parametros` en la
-    etapa ``"limpieza"`` de la versión actual. Todas las excepciones que
-    puede lanzar son :class:`LimpiezaError`, con un mensaje en español.
-
-    Devuelve un ``dict`` con ``destino`` (ruta de la malla limpia),
-    ``version_bruto`` (versión de la que salió la malla en bruto usada),
-    ``version_actual``, ``caras`` (caras de la malla limpia),
-    ``distancia_mm`` (distancia máxima medida) y ``reemplazo`` (``True`` si
-    ya existía una malla limpia de esta versión y se reemplazó).
+    Ver el resumen de pasos en el docstring del módulo. Si el cierre rápido en
+    Python no consigue cerrar la malla y ``sin_blender`` es ``False``, intenta
+    cerrarla con el remallado por vóxeles de Blender (`voxel_mm`).
     """
+    from castkit.blender import BlenderNotFoundError, find_blender
+
     carpeta = Path(carpeta)
     arriba = validar_arriba(arriba)
 
@@ -348,15 +378,42 @@ def limpiar_malla(
 
     malla.apply_transform(_transformacion_arriba(arriba))
     _escalar_uniforme(malla, alto_mm, corte_base_mm)
+    malla_escalada_original = malla.copy()
 
-    huecos_cerrados = _cerrar_huecos(malla, agujero_max_mm)
-    trimesh.repair.fix_normals(malla)
-    if not malla.is_watertight:
-        raise LimpiezaError(
-            "La malla no quedó cerrada (watertight) tras rellenar sus huecos; no se puede "
-            "continuar. Siguientes pasos: corrige el modelo y vuelve a hacer "
-            '"castkit ingesta" con una malla nueva.'
-        )
+    metodo = "python"
+    huecos_cerrados: list[dict[str, Any]] = []
+    error_python: LimpiezaError | None = None
+
+    try:
+        huecos_cerrados = _cerrar_huecos(malla, agujero_max_mm)
+        trimesh.repair.fix_normals(malla)
+        if not malla.is_watertight:
+            error_python = LimpiezaError(
+                "La malla no quedó cerrada (watertight) tras rellenar sus huecos; no se puede "
+                "continuar. Siguientes pasos: corrige el modelo y vuelve a hacer "
+                '"castkit ingesta" con una malla nueva.'
+            )
+    except LimpiezaError as exc:
+        error_python = exc
+
+    if error_python is not None:
+        if sin_blender:
+            raise error_python
+        try:
+            find_blender()
+        except BlenderNotFoundError as exc:
+            raise LimpiezaError(
+                f"{error_python} (Nota: instalando Blender LTS o configurando BLENDER_BIN "
+                "se podría reintentar automáticamente con remallado por vóxeles)."
+            ) from exc
+
+        malla = _remallar_con_blender(malla_escalada_original, voxel_mm)
+        metodo = "blender"
+        huecos_cerrados = []
+        if not malla.is_watertight:
+            raise LimpiezaError(
+                "La malla tampoco quedó cerrada tras el remallado de respaldo con Blender."
+            )
 
     plano_z = float(malla.bounds[0][2]) + corte_base_mm
     zonas_excluidas = [
@@ -407,6 +464,7 @@ def limpiar_malla(
     malla_limpia.export(destino)
 
     parametros: dict[str, Any] = {
+        "metodo": metodo,
         "caras_max": caras_max,
         "tolerancia_mm": tolerancia_mm,
         "corte_base_mm": corte_base_mm,
@@ -417,6 +475,9 @@ def limpiar_malla(
         "caras": len(malla_limpia.faces),
         "distancia_max_mm": distancia_mm,
     }
+    if metodo == "blender":
+        parametros["voxel_mm"] = voxel_mm
+
     try:
         registrar_parametros(carpeta, "limpieza", parametros)
     except Exception:
@@ -426,6 +487,7 @@ def limpiar_malla(
 
     return {
         "destino": destino,
+        "metodo": metodo,
         "version_bruto": version_bruto,
         "version_actual": version_actual,
         "caras": len(malla_limpia.faces),

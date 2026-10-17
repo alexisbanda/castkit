@@ -264,6 +264,39 @@ def generar_matriz(
         tmp_path.unlink(missing_ok=True)
         raise
 
+    nombre_ficha = nombre_archivo(nombre_diseno, version_actual, "ficha", "md")
+    ruta_ficha = carpeta / "output" / nombre_ficha
+    material = datos.get("material", "")
+    advertencias = {
+        "cera": "- Verificar que el canal de mecha esté despejado antes de verter la silicona.",
+        "silicona": (
+            "- Aplicar desmoldante obligatoriamente antes de verter silicona sobre silicona."
+        ),
+        "porcelana-fria": "- Considerar la contracción de secado de la porcelana fría.",
+    }.get(material, "- Revisar el curado completo de la silicona antes de desmoldar.")
+
+    linea_silicona = (
+        f"- **Silicona líquida estimada:** ~{volumen_silicona_ml:.1f} ml\n"
+        if volumen_silicona_ml is not None
+        else ""
+    )
+    contenido_ficha = (
+        f"# Ficha técnica: {nombre_diseno} (v{version_actual})\n\n"
+        f"- **Material final de la figura:** `{material}`\n"
+        f"- **Modo de matriz impresa:** `{modo}`\n"
+        f"- **Cavidades en la matriz:** {cavidades_en_matriz}\n"
+        f"- **Altura objetivo de figura:** {info_version['alto_mm']} mm\n"
+        f"- **Dimensiones exteriores de la matriz:** "
+        f"{dimensiones_mm['ancho_mm']} × {dimensiones_mm['fondo_mm']} × "
+        f"{dimensiones_mm['alto_total_mm']} mm\n"
+        f"- **Volumen por figura:** {volumen_figura_cm3} cm³\n"
+        f"{linea_silicona}"
+        f"- **Archivo STL para impresora 3D:** `{nombre_destino}`\n\n"
+        f"## Advertencias de taller\n\n"
+        f"{advertencias}\n"
+    )
+    ruta_ficha.write_text(contenido_ficha, encoding="utf-8")
+
     parametros_registro: dict[str, Any] = {
         "modo": modo,
         "cavidades": cavidades_en_matriz,
@@ -275,12 +308,14 @@ def generar_matriz(
         "dimensiones_mm": dimensiones_mm,
         "volumen_figura_cm3": volumen_figura_cm3,
         "volumen_silicona_ml": volumen_silicona_ml,
+        "ficha": nombre_ficha,
         "caras": len(malla_matriz.faces),
     }
     registrar_parametros(carpeta, "matriz", parametros_registro)
 
     return {
         "destino": destino,
+        "ficha": ruta_ficha,
         "modo": modo,
         "cavidades": cavidades_en_matriz,
         "dimensiones_mm": dimensiones_mm,

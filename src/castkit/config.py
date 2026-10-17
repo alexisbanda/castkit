@@ -17,6 +17,7 @@ from castkit.diseno import AltaError
 
 _CLAVES_LIMPIEZA = ("caras_max", "tolerancia_mm", "corte_base_mm", "agujero_max_mm")
 _CLAVES_GENERACION = ("proveedor", "comando")
+_CLAVES_MECHA = ("diametro_mecha_mm", "espesor_minimo_pared_mm")
 _CLAVES_MATRIZ = (
     "espesor_base_mm",
     "margen_silicona_mm",
@@ -50,7 +51,11 @@ def ruta_config_fabricacion() -> Path:
     return _RUTA_POR_DEFECTO
 
 
-def _cargar_seccion(nombre_seccion: str, claves_requeridas: tuple[str, ...]) -> dict[str, Any]:
+def _cargar_seccion(
+    nombre_seccion: str,
+    claves_requeridas: tuple[str, ...],
+    opcionales: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Carga y valida una sección de `config/fabricacion.toml`."""
     ruta = ruta_config_fabricacion()
     if not ruta.is_file():
@@ -70,32 +75,32 @@ def _cargar_seccion(nombre_seccion: str, claves_requeridas: tuple[str, ...]) -> 
             f"{', '.join(faltantes)}."
         )
 
-    return {clave: seccion[clave] for clave in claves_requeridas}
+    resultado = {clave: seccion[clave] for clave in claves_requeridas}
+    if opcionales:
+        for clave, por_defecto in opcionales.items():
+            resultado[clave] = seccion.get(clave, por_defecto)
+    return resultado
 
 
 def cargar_config_limpieza() -> dict[str, Any]:
     """Carga la sección `[limpieza]` de `config/fabricacion.toml`.
 
     Devuelve un `dict` con las claves `caras_max`, `tolerancia_mm`,
-    `corte_base_mm` y `agujero_max_mm`. Lanza :class:`ConfigError` si el
-    archivo no existe, no se puede leer como TOML, o a la sección
-    `[limpieza]` le falta alguna de esas claves.
+    `corte_base_mm`, `agujero_max_mm` y `voxel_mm`.
     """
-    return _cargar_seccion("limpieza", _CLAVES_LIMPIEZA)
+    return _cargar_seccion("limpieza", _CLAVES_LIMPIEZA, opcionales={"voxel_mm": 0.3})
 
 
 def cargar_config_generacion() -> dict[str, Any]:
-    """Carga la sección `[generacion]` de `config/fabricacion.toml`.
-
-    Devuelve un `dict` con las claves `proveedor` y `comando`.
-    """
+    """Carga la sección `[generacion]` de `config/fabricacion.toml`."""
     return _cargar_seccion("generacion", _CLAVES_GENERACION)
 
 
-def cargar_config_matriz() -> dict[str, Any]:
-    """Carga la sección `[matriz]` de `config/fabricacion.toml`.
+def cargar_config_mecha() -> dict[str, Any]:
+    """Carga la sección `[mecha]` de `config/fabricacion.toml`."""
+    return _cargar_seccion("mecha", _CLAVES_MECHA)
 
-    Devuelve un `dict` con las claves `espesor_base_mm`, `margen_silicona_mm`,
-    `espesor_pared_mm`, `margen_superior_mm` y `separacion_cavidades_mm`.
-    """
+
+def cargar_config_matriz() -> dict[str, Any]:
+    """Carga la sección `[matriz]` de `config/fabricacion.toml`."""
     return _cargar_seccion("matriz", _CLAVES_MATRIZ)

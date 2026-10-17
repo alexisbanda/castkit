@@ -13,6 +13,7 @@ from castkit.config import (
     ConfigError,
     cargar_config_limpieza,
     cargar_config_matriz,
+    cargar_config_mecha,
 )
 from castkit.diseno import (
     LICENCIAS,
@@ -27,6 +28,7 @@ from castkit.generacion import GeneracionError, generar_malla
 from castkit.ingesta import IngestaError, ingerir_malla, validar_malla
 from castkit.limpieza import EJES_ACEPTADOS, LimpiezaError, limpiar_malla, validar_arriba
 from castkit.matriz import MODOS_MATRIZ, MatrizError, generar_matriz, validar_modo_matriz
+from castkit.mecha import MechaError, ParedFinaMechaError, aplicar_canal_mecha
 from castkit.versiones import (
     VersionError,
     cargar_diseno,
@@ -168,6 +170,41 @@ def _construir_parser() -> argparse.ArgumentParser:
         help="Perímetro máximo, en mm, de una zona abierta para cerrarla automáticamente "
         "(si se omite, se usa config/fabricacion.toml).",
     )
+    limpieza.add_argument(
+        "--voxel-mm",
+        dest="voxel_mm",
+        default=None,
+        help="Tamaño de vóxel, en mm, para el remallado de respaldo con Blender.",
+    )
+    limpieza.add_argument(
+        "--sin-blender",
+        dest="sin_blender",
+        action="store_true",
+        help="Desactiva el respaldo con remallado de Blender si Python no cierra la malla.",
+    )
+
+    mecha = subparsers.add_parser(
+        "mecha",
+        help="Añade el canal vertical de mecha cuando el material del diseño es cera.",
+    )
+    mecha.add_argument("nombre", help="Nombre del diseño (minúsculas, números y guiones).")
+    mecha.add_argument(
+        "--diametro-mm",
+        dest="diametro_mm",
+        default=None,
+        help="Diámetro del canal de mecha en mm (por defecto en config/fabricacion.toml).",
+    )
+    mecha.add_argument(
+        "--espesor-minimo-mm",
+        dest="espesor_minimo_mm",
+        default=None,
+        help="Espesor mínimo de pared lateral en mm alrededor del canal.",
+    )
+    mecha.add_argument(
+        "--forzar",
+        action="store_true",
+        help="Continúa sin preguntar aunque el espesor de pared quede bajo el mínimo.",
+    )
 
     matriz = subparsers.add_parser(
         "matriz",
@@ -209,6 +246,24 @@ def _construir_parser() -> argparse.ArgumentParser:
         dest="separacion_cavidades_mm",
         default=None,
         help="Separación mínima en mm entre figuras vecinas (modo cubeta).",
+    )
+
+    flujo = subparsers.add_parser(
+        "flujo",
+        help="Ejecuta en cadena generar -> limpieza -> mecha (si es cera) -> matriz.",
+    )
+    flujo.add_argument("nombre", help="Nombre del diseño ya dado de alta.")
+    flujo.add_argument(
+        "--modo",
+        default=None,
+        help=f"Modo de matriz ({', '.join(MODOS_MATRIZ)}).",
+    )
+    flujo.add_argument("--proveedor", default=None, help="Proveedor enchufable de generación 3D.")
+    flujo.add_argument("--prompt", default=None, help="Prompt adicional para la generación 3D.")
+    flujo.add_argument(
+        "--reemplazar",
+        action="store_true",
+        help="Reemplaza la malla en bruto si ya existía.",
     )
 
     return parser
@@ -485,6 +540,11 @@ def _ejecutar_limpieza(args: argparse.Namespace) -> int:
             if args.agujero_max_mm is not None
             else float(config["agujero_max_mm"])
         )
+        voxel_mm = (
+            _parsear_numero_positivo(args.voxel_mm, "--voxel-mm")
+            if getattr(args, "voxel_mm", None) is not None
+            else float(config.get("voxel_mm", 0.3))
+        )
     except (AltaError, LimpiezaError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -497,6 +557,8 @@ def _ejecutar_limpieza(args: argparse.Namespace) -> int:
             tolerancia_mm=tolerancia_mm,
             corte_base_mm=corte_base_mm,
             agujero_max_mm=agujero_max_mm,
+            voxel_mm=voxel_mm,
+            sin_blender=bool(getattr(args, "sin_blender", False)),
         )
     except (AltaError, VersionError, LimpiezaError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -507,6 +569,8 @@ def _ejecutar_limpieza(args: argparse.Namespace) -> int:
             f"Aviso: la versión v{resultado['version_actual']} de «{args.nombre}» no tiene "
             f"malla en bruto propia; se usó la de v{resultado['version_bruto']}."
         )
+    if resultado.get("metodo") == "blender":
+        print("Aviso: no se pudo cerrar con el método rápido; se cerró con remallado de Blender.")
     if resultado["reemplazo"]:
         print(f"Se reemplazó la malla limpia anterior de «{args.nombre}».")
 
@@ -564,6 +628,76 @@ def _ejecutar_generar(args: argparse.Namespace) -> int:
     print(
         f"Malla de «{args.nombre}» generada con «{resultado['proveedor']}» en "
         f"{resultado['destino']} ({resultado['caras']} caras, {resultado['vertices']} vértices)."
+    )
+    return 0
+
+
+def _ejecutar_mecha(args: argparse.Namespace) -> int:
+    try:
+        carpeta = ubicar_diseno(args.nombre)
+    except (AltaError, VersionError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        config = cargar_config_mecha()
+    except ConfigError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        diametro_mm = (
+            _parsear_numero_positivo(args.diametro_mm, "--diametro-mm")
+            if args.diametro_mm is not None
+            else float(config["diametro_mecha_mm"])
+        )
+        espesor_minimo_mm = (
+            _parsear_numero_positivo(args.espesor_minimo_mm, "--espesor-minimo-mm")
+            if args.espesor_minimo_mm is not None
+            else float(config["espesor_minimo_pared_mm"])
+        )
+    except AltaError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    forzar = bool(args.forzar)
+    try:
+        resultado = aplicar_canal_mecha(
+            carpeta,
+            diametro_mecha_mm=diametro_mm,
+            espesor_minimo_pared_mm=espesor_minimo_mm,
+            confirmar_pared_fina=forzar,
+        )
+    except ParedFinaMechaError as exc:
+        if sys.stdin.isatty():
+            respuesta = input(f"Aviso: {exc} ¿Continuar de todos modos? (s/N): ").strip().lower()
+            if respuesta in ("s", "si", "sí"):
+                resultado = aplicar_canal_mecha(
+                    carpeta,
+                    diametro_mecha_mm=diametro_mm,
+                    espesor_minimo_pared_mm=espesor_minimo_mm,
+                    confirmar_pared_fina=True,
+                )
+            else:
+                print("No se ha modificado nada.", file=sys.stderr)
+                return 1
+        else:
+            print(f"Error: {exc} Usa --forzar para continuar.", file=sys.stderr)
+            return 2
+    except (AltaError, VersionError, MechaError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    if not resultado["aplicado"]:
+        print(
+            f"El diseño «{args.nombre}» es de «{resultado['material']}»: "
+            "no requiere canal de mecha."
+        )
+        return 0
+
+    print(
+        f"Canal de mecha ({resultado['diametro_mecha_mm']} mm) aplicado en {resultado['destino']} "
+        f"(espesor mínimo de pared {resultado['espesor_pared_medido_mm']:.2f} mm)."
     )
     return 0
 
@@ -650,9 +784,50 @@ def _ejecutar_matriz(args: argparse.Namespace) -> int:
     print(
         f"Matriz ({resultado['modo']}) de «{args.nombre}» guardada en {resultado['destino']} "
         f"({dims['ancho_mm']} × {dims['fondo_mm']} × {dims['alto_total_mm']} mm"
-        f"{extra_silicona})."
+        f"{extra_silicona}) y ficha en {resultado['ficha']}."
     )
     return 0
+
+
+def _ejecutar_flujo(args: argparse.Namespace) -> int:
+    rc_gen = _ejecutar_generar(args)
+    if rc_gen != 0:
+        return rc_gen
+
+    args_limpieza = argparse.Namespace(
+        nombre=args.nombre,
+        arriba="z",
+        caras_max=None,
+        tolerancia_mm=None,
+        corte_base_mm=None,
+        agujero_max_mm=None,
+        voxel_mm=None,
+        sin_blender=False,
+    )
+    rc_limp = _ejecutar_limpieza(args_limpieza)
+    if rc_limp != 0:
+        return rc_limp
+
+    args_mecha = argparse.Namespace(
+        nombre=args.nombre,
+        diametro_mm=None,
+        espesor_minimo_mm=None,
+        forzar=False,
+    )
+    rc_mecha = _ejecutar_mecha(args_mecha)
+    if rc_mecha != 0:
+        return rc_mecha
+
+    args_matriz = argparse.Namespace(
+        nombre=args.nombre,
+        modo=args.modo,
+        espesor_base_mm=None,
+        margen_silicona_mm=None,
+        espesor_pared_mm=None,
+        margen_superior_mm=None,
+        separacion_cavidades_mm=None,
+    )
+    return _ejecutar_matriz(args_matriz)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -671,8 +846,12 @@ def main(argv: list[str] | None = None) -> int:
         return _ejecutar_generar(args)
     if args.comando == "limpieza":
         return _ejecutar_limpieza(args)
+    if args.comando == "mecha":
+        return _ejecutar_mecha(args)
     if args.comando == "matriz":
         return _ejecutar_matriz(args)
+    if args.comando == "flujo":
+        return _ejecutar_flujo(args)
 
     parser.print_help(sys.stderr)
     return 2

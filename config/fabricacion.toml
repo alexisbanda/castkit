@@ -22,9 +22,13 @@ corte_base_mm = 0.5
 # impiden cerrar la malla.
 agujero_max_mm = 10
 
+# Tamaño de vóxel, en milímetros, usado cuando se recurre al remallado de
+# respaldo en Blender para cerrar mallas muy abiertas.
+voxel_mm = 0.3
+
 [generacion]
 # Proveedor enchufable por defecto para generar la malla 3D a partir de los
-# insumos del brief (imágenes, documentos .pdf/.ai o texto/prompt).
+# insumos del brief ("comando", "tripo3d" o "fal").
 proveedor = "comando"
 
 # Comando externo para el proveedor "comando". Se ejecuta pasando la ruta de
@@ -32,6 +36,14 @@ proveedor = "comando"
 # junto con las rutas de los insumos en CASTKIT_INSUMOS y el prompt en
 # CASTKIT_PROMPT.
 comando = ""
+
+[mecha]
+# Diámetro, en milímetros, del canal de mecha vertical para figuras de cera.
+diametro_mecha_mm = 3.0
+
+# Espesor mínimo de pared lateral, en milímetros, que debe quedar alrededor del
+# canal de mecha antes de pedir confirmación al operador.
+espesor_minimo_pared_mm = 1.2
 
 [matriz]
 # Espesor, en milímetros, de la placa base inferior sobre la que apoya la

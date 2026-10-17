@@ -16,14 +16,22 @@ contrario, se delega la creación del `.stl` en un **proveedor enchufable**
 
 from __future__ import annotations
 
+import base64
+import json
+import mimetypes
 import os
 import shlex
 import shutil
 import subprocess
 import tempfile
+import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
+
+import trimesh
 
 from castkit.config import cargar_config_generacion
 from castkit.ingesta import IngestaError, sha256_archivo, validar_malla
@@ -82,6 +90,183 @@ class ProveedorGeneracion3D(Protocol):
         Debe lanzar :class:`GeneracionError` si la generación no puede
         completarse.
         """
+
+
+def _descargar_y_convertir_a_stl(url_modelo: str, destino_stl: Path) -> None:
+    """Descarga un modelo 3D (`.glb`, `.obj`, `.stl`) desde ``url_modelo`` y lo exporta como STL."""
+    sufijo = Path(url_modelo.split("?")[0]).suffix.lower() or ".glb"
+    descriptor, tmp_str = tempfile.mkstemp(prefix=".modelo-remoto-", suffix=sufijo)
+    os.close(descriptor)
+    tmp_path = Path(tmp_str)
+    try:
+        req = urllib.request.Request(url_modelo, headers={"User-Agent": "castkit/0.1"})
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            tmp_path.write_bytes(resp.read())
+        escena_o_malla = trimesh.load(tmp_path, force="mesh")
+        escena_o_malla.export(destino_stl, file_type="stl")
+    except Exception as exc:
+        raise GeneracionError(
+            f"No se pudo descargar o convertir a STL el modelo generado ({url_modelo}): {exc}"
+        ) from exc
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+class ProveedorFal:
+    """Proveedor enchufable para Fal.ai (p. ej. `fal-ai/trellis` o `fal-ai/hunyuan3d/v2/mini`).
+
+    Lee la clave de la variable de entorno ``FAL_KEY``.
+    """
+
+    def __init__(self, endpoint: str = "fal-ai/trellis") -> None:
+        self.endpoint = endpoint.strip() or "fal-ai/trellis"
+
+    def generar(self, insumos: InsumosBrief, destino_stl: Path) -> None:
+        api_key = os.environ.get("FAL_KEY", "").strip()
+        if not api_key:
+            raise GeneracionError(
+                'El proveedor "fal" requiere la variable de entorno FAL_KEY '
+                '(por ejemplo: export FAL_KEY="tu-api-key").'
+            )
+        if not insumos.imagenes:
+            raise GeneracionError(
+                'El proveedor "fal" requiere al menos una imagen (.png, .jpg, .webp) en brief/.'
+            )
+
+        img = insumos.imagenes[0]
+        mime = mimetypes.guess_type(img.name)[0] or "image/png"
+        b64 = base64.b64encode(img.read_bytes()).decode("ascii")
+        payload: dict[str, Any] = {"image_url": f"data:{mime};base64,{b64}"}
+        if insumos.prompt:
+            payload["prompt"] = insumos.prompt
+
+        url = f"https://fal.run/{self.endpoint}"
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Authorization": f"Key {api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=300) as resp:
+                datos = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            cuerpo = exc.read().decode("utf-8", errors="replace")
+            raise GeneracionError(f'Error HTTP {exc.code} del proveedor "fal": {cuerpo}') from exc
+        except Exception as exc:
+            raise GeneracionError(f'Error al conectar con el proveedor "fal": {exc}') from exc
+
+        url_modelo = (
+            (datos.get("model_mesh") or {}).get("url")
+            or (datos.get("mesh") or {}).get("url")
+            or datos.get("model_url")
+        )
+        if not url_modelo:
+            raise GeneracionError(
+                f'La respuesta de "fal" no incluyó ninguna URL de malla 3D: {datos}'
+            )
+
+        _descargar_y_convertir_a_stl(str(url_modelo), destino_stl)
+
+
+class ProveedorTripo3D:
+    """Proveedor enchufable para Tripo3D API v2 (soporta Imagen → 3D y Texto → 3D).
+
+    Lee la clave de la variable de entorno ``TRIPO_API_KEY``.
+    """
+
+    def generar(self, insumos: InsumosBrief, destino_stl: Path) -> None:
+        api_key = os.environ.get("TRIPO_API_KEY", "").strip()
+        if not api_key:
+            raise GeneracionError(
+                'El proveedor "tripo3d" requiere la variable de entorno TRIPO_API_KEY '
+                '(por ejemplo: export TRIPO_API_KEY="tsk_...").'
+            )
+
+        headers_json = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+
+        if insumos.imagenes:
+            img = insumos.imagenes[0]
+            boundary = "----CastkitTripoBoundary"
+            mime = mimetypes.guess_type(img.name)[0] or "image/png"
+            cuerpo_multipart = (
+                (
+                    f"--{boundary}\r\n"
+                    f'Content-Disposition: form-data; name="file"; filename="{img.name}"\r\n'
+                    f"Content-Type: {mime}\r\n\r\n"
+                ).encode()
+                + img.read_bytes()
+                + f"\r\n--{boundary}--\r\n".encode()
+            )
+
+            req_up = urllib.request.Request(
+                "https://api.tripo3d.ai/v2/openapi/upload",
+                data=cuerpo_multipart,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": f"multipart/form-data; boundary={boundary}",
+                },
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req_up, timeout=120) as resp:
+                    up_data = json.loads(resp.read().decode("utf-8"))
+                image_token = up_data["data"]["image_token"]
+            except Exception as exc:
+                raise GeneracionError(f'No se pudo subir la imagen a "tripo3d": {exc}') from exc
+
+            ext_img = img.suffix.lstrip(".").lower() or "png"
+            task_payload: dict[str, Any] = {
+                "type": "image_to_model",
+                "file": {"type": ext_img, "file_token": image_token},
+            }
+        else:
+            task_payload = {
+                "type": "text_to_model",
+                "prompt": insumos.prompt,
+            }
+
+        req_task = urllib.request.Request(
+            "https://api.tripo3d.ai/v2/openapi/task",
+            data=json.dumps(task_payload).encode("utf-8"),
+            headers=headers_json,
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req_task, timeout=60) as resp:
+                task_data = json.loads(resp.read().decode("utf-8"))
+            task_id = task_data["data"]["task_id"]
+        except Exception as exc:
+            raise GeneracionError(f'No se pudo crear la tarea en "tripo3d": {exc}') from exc
+
+        for _ in range(90):
+            req_poll = urllib.request.Request(
+                f"https://api.tripo3d.ai/v2/openapi/task/{task_id}",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            with urllib.request.urlopen(req_poll, timeout=60) as resp:
+                estado_data = json.loads(resp.read().decode("utf-8"))["data"]
+            status = estado_data.get("status")
+            if status == "success":
+                salida = estado_data.get("output") or {}
+                url_modelo = salida.get("model") or salida.get("pbr_model")
+                if not url_modelo:
+                    raise GeneracionError(
+                        f'La tarea de "tripo3d" terminó sin URL de modelo: {estado_data}'
+                    )
+                _descargar_y_convertir_a_stl(str(url_modelo), destino_stl)
+                return
+            if status in ("failed", "cancelled", "banned", "expired"):
+                raise GeneracionError(f'La tarea de "tripo3d" falló con estado "{status}".')
+            time.sleep(2.0)
+
+        raise GeneracionError('Tiempo de espera agotado esperando al proveedor "tripo3d".')
 
 
 class ProveedorComando:
@@ -153,8 +338,8 @@ def obtener_proveedor(
     """Devuelve la instancia del proveedor ``nombre``.
 
     Busca primero en los proveedores registrados con :func:`registrar_proveedor`
-    y luego en los proveedores integrados (`"comando"`). Lanza
-    :class:`GeneracionError` si el nombre no corresponde a ningún proveedor.
+    y luego en los proveedores integrados (`"comando"`, `"fal"`, `"tripo3d"`).
+    Lanza :class:`GeneracionError` si el nombre no corresponde a ningún proveedor.
     """
     if nombre in _PROVEEDORES_REGISTRADOS:
         return _PROVEEDORES_REGISTRADOS[nombre]
@@ -162,8 +347,12 @@ def obtener_proveedor(
     if nombre == "comando":
         comando = (config_generacion or {}).get("comando", "")
         return ProveedorComando(str(comando))
+    if nombre == "fal":
+        return ProveedorFal()
+    if nombre == "tripo3d":
+        return ProveedorTripo3D()
 
-    disponibles = sorted({"comando", *_PROVEEDORES_REGISTRADOS.keys()})
+    disponibles = sorted({"comando", "fal", "tripo3d", *_PROVEEDORES_REGISTRADOS.keys()})
     raise GeneracionError(
         f'El proveedor de generación 3D "{nombre}" no está registrado. '
         f"Proveedores disponibles: {', '.join(disponibles)}."
