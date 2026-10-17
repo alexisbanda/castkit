@@ -165,13 +165,40 @@ def test_caras_max_y_tolerancia_se_respetan_tras_simplificar(
     assert parametros["distancia_max_mm"] <= 5.0
 
 
+def test_distancia_mayor_que_tolerancia_falla_sin_escribir_archivo(
+    disenos_dir: Path, brief_dir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Misma simplificación agresiva que el test anterior, pero con una tolerancia
+    demasiado chica para la distancia que introduce: debe rechazarse el resultado.
+    """
+    _dar_alta("guagua-pan", brief_dir, alto_mm=13.5)
+    assert main(_argv_ingesta("guagua-pan", str(AGUJEROS_STL))) == 0
+
+    codigo = main(_argv_limpieza("guagua-pan", caras_max="40", tolerancia_mm="0.01"))
+
+    assert codigo != 0
+    destino = disenos_dir / "guagua-pan" / "work" / "guagua-pan_v1_limpia.stl"
+    assert not destino.exists()
+
+    error = capsys.readouterr().err
+    assert "distancia" in error.lower()
+    assert "tolerancia" in error.lower()
+    assert "0.01" in error
+
+    # no quedó ningún registro de una limpieza fallida
+    datos = cargar_diseno(disenos_dir / "guagua-pan")
+    assert "limpieza" not in datos["versiones"]["v1"]["parametros"]
+
+
 # ---------------------------------------------------------------------------
 # Criterio: alto_mm (±0.1 mm) y proporciones ancho/fondo/alto (±0.5 %).
 # ---------------------------------------------------------------------------
 
 
 def test_altura_final_y_proporciones_se_conservan(disenos_dir: Path, brief_dir: Path) -> None:
-    _dar_alta("guagua-pan", brief_dir, alto_mm=50.0)
+    corte_base_mm = 0.5  # valor por defecto de config/fabricacion.toml
+    alto_mm = 50.0
+    _dar_alta("guagua-pan", brief_dir, alto_mm=alto_mm)
     assert main(_argv_ingesta("guagua-pan", str(TUMBADA_STL))) == 0
     assert main(_argv_limpieza("guagua-pan")) == 0
 
@@ -179,11 +206,15 @@ def test_altura_final_y_proporciones_se_conservan(disenos_dir: Path, brief_dir: 
     malla = trimesh.load(destino)
 
     alto_final = malla.bounds[1][2] - malla.bounds[0][2]
-    assert alto_final == pytest.approx(50.0, abs=0.1)
+    assert alto_final == pytest.approx(alto_mm, abs=0.1)
 
+    # tumbada.stl mide 30 (X) x 20 (Y) x 10 (Z); con --arriba z (por defecto) el
+    # alto es el eje Z. El escalado es uniforme: el mismo factor que lleva los
+    # 10 mm de alto a (alto_mm + corte_base_mm) debe aplicarse a ancho y fondo.
+    factor = (alto_mm + corte_base_mm) / 10.0
     ancho, fondo, _alto = malla.extents
-    # tumbada.stl mide 30 (X) x 20 (Y) x 10 (Z); con --arriba z (por defecto)
-    # el alto es el eje Z, así que ancho/fondo deben conservar la razón 30/20.
+    assert ancho == pytest.approx(30.0 * factor, rel=0.005)
+    assert fondo == pytest.approx(20.0 * factor, rel=0.005)
     assert (ancho / fondo) == pytest.approx(30.0 / 20.0, rel=0.005)
 
 
@@ -194,15 +225,33 @@ def test_altura_final_y_proporciones_se_conservan(disenos_dir: Path, brief_dir: 
 
 
 def test_base_queda_plana_y_recortada(disenos_dir: Path, brief_dir: Path) -> None:
-    _dar_alta("guagua-pan", brief_dir, alto_mm=9.5)
+    # alto_mm y corte_base_mm elegidos para que el factor de escala (2.0) no
+    # sea 1: así "ancho/fondo escalados" (20 mm) y "alto final" (19 mm) quedan
+    # claramente distintos, y la diferencia de 1 mm entre ambos solo puede
+    # venir de haber recortado corte_base_mm de la base.
+    alto_mm = 19.0
+    corte_base_mm = 1.0
+    _dar_alta("guagua-pan", brief_dir, alto_mm=alto_mm)
     assert main(_argv_ingesta("guagua-pan", str(CUBE_STL))) == 0
-    assert main(_argv_limpieza("guagua-pan")) == 0
+    assert main(_argv_limpieza("guagua-pan", corte_base_mm=str(corte_base_mm))) == 0
 
     destino = disenos_dir / "guagua-pan" / "work" / "guagua-pan_v1_limpia.stl"
     malla = trimesh.load(destino)
 
     assert malla.bounds[0][2] == pytest.approx(0.0, abs=0.01)
-    assert malla.bounds[1][2] - malla.bounds[0][2] == pytest.approx(9.5, abs=0.1)
+
+    alto_final = malla.bounds[1][2] - malla.bounds[0][2]
+    assert alto_final == pytest.approx(alto_mm, abs=0.1)
+
+    # cube.stl mide 10x10x10; el escalado uniforme lleva su altura a
+    # (alto_mm + corte_base_mm) ANTES de recortar la base, así que ancho y
+    # fondo (que el recorte no toca) deben quedar en ese tamaño, no en
+    # alto_mm: la diferencia frente a alto_final es justo corte_base_mm.
+    factor = (alto_mm + corte_base_mm) / 10.0
+    ancho, fondo, _alto = malla.extents
+    assert ancho == pytest.approx(10.0 * factor, rel=0.005)
+    assert fondo == pytest.approx(10.0 * factor, rel=0.005)
+    assert (ancho - alto_final) == pytest.approx(corte_base_mm, abs=0.1)
 
     caras = malla.faces
     vertices_z = malla.vertices[caras][:, :, 2]
@@ -305,7 +354,23 @@ def test_ninguna_version_con_malla_pide_ingesta(disenos_dir: Path, brief_dir: Pa
 def test_malla_no_cerrable_falla_sin_escribir_archivo(
     disenos_dir: Path, brief_dir: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _dar_alta("guagua-pan", brief_dir, alto_mm=13.5)
+    alto_mm = 13.5
+    corte_base_mm = 0.5  # valor por defecto de config/fabricacion.toml
+
+    # Zona esperada: la calculamos aparte, aplicando a rota.stl el mismo
+    # escalado que hace el pipeline por defecto (--arriba z es la identidad,
+    # así que solo hay que escalar), para no depender de números fijados a
+    # mano que se desincronicen si se regenera la fixture.
+    from castkit.limpieza import _detectar_huecos, _formatear_zonas
+
+    malla_esperada = trimesh.load(ROTA_STL, file_type="stl", force="mesh")
+    altura_bruta = float(malla_esperada.bounds[1][2] - malla_esperada.bounds[0][2])
+    malla_esperada.apply_scale((alto_mm + corte_base_mm) / altura_bruta)
+    huecos_esperados = _detectar_huecos(malla_esperada)
+    assert len(huecos_esperados) == 1
+    zona_esperada = _formatear_zonas(huecos_esperados)
+
+    _dar_alta("guagua-pan", brief_dir, alto_mm=alto_mm)
     assert main(_argv_ingesta("guagua-pan", str(ROTA_STL))) == 0
 
     codigo = main(_argv_limpieza("guagua-pan"))
@@ -318,6 +383,8 @@ def test_malla_no_cerrable_falla_sin_escribir_archivo(
     assert "1 zona" in error or "zona(s)" in error
     assert "mm" in error
     assert "siguientes pasos" in error.lower() or "Siguientes pasos" in error
+    # el mensaje debe incluir el centro y el tamaño aproximados de la zona.
+    assert zona_esperada in error
 
 
 # ---------------------------------------------------------------------------
