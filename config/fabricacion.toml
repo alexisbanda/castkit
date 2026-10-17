@@ -1,0 +1,23 @@
+# Parámetros de fabricación de castkit.
+#
+# Cada sección corresponde a una etapa del pipeline. Las opciones de la
+# línea de comandos de esa etapa (por ejemplo, --caras-max de
+# `castkit limpieza`) sobrescriben, una a una, los valores de aquí.
+
+[limpieza]
+# Número máximo de caras de la malla limpia (se simplifica si la malla en
+# bruto, ya escalada y cerrada, tiene más).
+caras_max = 200000
+
+# Distancia máxima, en milímetros, permitida entre la malla original
+# (escalada y recortada) y la malla limpia.
+tolerancia_mm = 0.2
+
+# Milímetros que se recortan desde la base de la malla antes de dejarla
+# plana en z = 0.
+corte_base_mm = 0.5
+
+# Perímetro máximo, en milímetros, de una zona abierta de la malla (medido
+# tras escalarla) para que se cierre automáticamente. Las zonas más grandes
+# impiden cerrar la malla.
+agujero_max_mm = 10

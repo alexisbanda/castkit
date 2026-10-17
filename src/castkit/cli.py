@@ -9,6 +9,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
+from castkit.config import ConfigError, cargar_config_limpieza
 from castkit.diseno import (
     LICENCIAS,
     MATERIALES,
@@ -19,6 +20,7 @@ from castkit.diseno import (
     validar_nombre,
 )
 from castkit.ingesta import IngestaError, ingerir_malla, validar_malla
+from castkit.limpieza import EJES_ACEPTADOS, LimpiezaError, limpiar_malla, validar_arriba
 from castkit.versiones import (
     VersionError,
     cargar_diseno,
@@ -100,6 +102,43 @@ def _construir_parser() -> argparse.ArgumentParser:
         "--reemplazar",
         action="store_true",
         help="Reemplaza sin preguntar la malla ya guardada en la versión actual, si existe.",
+    )
+
+    limpieza = subparsers.add_parser(
+        "limpieza", help="Limpia y escala automáticamente la malla en bruto de un diseño."
+    )
+    limpieza.add_argument("nombre", help="Nombre del diseño (minúsculas, números y guiones).")
+    limpieza.add_argument(
+        "--arriba",
+        default="z",
+        help=f"Eje que debe quedar hacia +Z antes de escalar: {', '.join(EJES_ACEPTADOS)} "
+        '(por defecto "z").',
+    )
+    limpieza.add_argument(
+        "--caras-max",
+        dest="caras_max",
+        default=None,
+        help="Caras máximas de la malla limpia (si se omite, se usa config/fabricacion.toml).",
+    )
+    limpieza.add_argument(
+        "--tolerancia-mm",
+        dest="tolerancia_mm",
+        default=None,
+        help="Distancia máxima, en mm, permitida frente a la malla original "
+        "(si se omite, se usa config/fabricacion.toml).",
+    )
+    limpieza.add_argument(
+        "--corte-base-mm",
+        dest="corte_base_mm",
+        default=None,
+        help="Milímetros a recortar desde la base (si se omite, se usa config/fabricacion.toml).",
+    )
+    limpieza.add_argument(
+        "--agujero-max-mm",
+        dest="agujero_max_mm",
+        default=None,
+        help="Perímetro máximo, en mm, de una zona abierta para cerrarla automáticamente "
+        "(si se omite, se usa config/fabricacion.toml).",
     )
 
     return parser
@@ -339,6 +378,75 @@ def _ejecutar_ingesta(args: argparse.Namespace) -> int:
     return 0
 
 
+def _ejecutar_limpieza(args: argparse.Namespace) -> int:
+    # Se ubica el diseño ANTES de leer la config o validar las opciones: si
+    # el diseño no existe, no se hace nada más.
+    try:
+        carpeta = ubicar_diseno(args.nombre)
+    except (AltaError, VersionError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        config = cargar_config_limpieza()
+    except ConfigError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        arriba = validar_arriba(args.arriba)
+        caras_max = (
+            _parsear_entero_minimo_uno(args.caras_max, "--caras-max")
+            if args.caras_max is not None
+            else int(config["caras_max"])
+        )
+        tolerancia_mm = (
+            _parsear_numero_positivo(args.tolerancia_mm, "--tolerancia-mm")
+            if args.tolerancia_mm is not None
+            else float(config["tolerancia_mm"])
+        )
+        corte_base_mm = (
+            _parsear_numero_positivo(args.corte_base_mm, "--corte-base-mm")
+            if args.corte_base_mm is not None
+            else float(config["corte_base_mm"])
+        )
+        agujero_max_mm = (
+            _parsear_numero_positivo(args.agujero_max_mm, "--agujero-max-mm")
+            if args.agujero_max_mm is not None
+            else float(config["agujero_max_mm"])
+        )
+    except (AltaError, LimpiezaError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        resultado = limpiar_malla(
+            carpeta,
+            arriba=arriba,
+            caras_max=caras_max,
+            tolerancia_mm=tolerancia_mm,
+            corte_base_mm=corte_base_mm,
+            agujero_max_mm=agujero_max_mm,
+        )
+    except (AltaError, VersionError, LimpiezaError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    if resultado["version_bruto"] != resultado["version_actual"]:
+        print(
+            f"Aviso: la versión v{resultado['version_actual']} de «{args.nombre}» no tiene "
+            f"malla en bruto propia; se usó la de v{resultado['version_bruto']}."
+        )
+    if resultado["reemplazo"]:
+        print(f"Se reemplazó la malla limpia anterior de «{args.nombre}».")
+
+    print(
+        f"Malla limpia de «{args.nombre}» guardada en {resultado['destino']} "
+        f"({resultado['caras']} caras, distancia máxima {resultado['distancia_mm']:.3f} mm)."
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Punto de entrada de `castkit`."""
     _configurar_salida_utf8()
@@ -351,6 +459,8 @@ def main(argv: list[str] | None = None) -> int:
         return _ejecutar_version(args)
     if args.comando == "ingesta":
         return _ejecutar_ingesta(args)
+    if args.comando == "limpieza":
+        return _ejecutar_limpieza(args)
 
     parser.print_help(sys.stderr)
     return 2
