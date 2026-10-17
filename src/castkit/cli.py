@@ -9,7 +9,11 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from castkit.config import ConfigError, cargar_config_limpieza
+from castkit.config import (
+    ConfigError,
+    cargar_config_limpieza,
+    cargar_config_matriz,
+)
 from castkit.diseno import (
     LICENCIAS,
     MATERIALES,
@@ -19,8 +23,10 @@ from castkit.diseno import (
     crear_diseno,
     validar_nombre,
 )
+from castkit.generacion import GeneracionError, generar_malla
 from castkit.ingesta import IngestaError, ingerir_malla, validar_malla
 from castkit.limpieza import EJES_ACEPTADOS, LimpiezaError, limpiar_malla, validar_arriba
+from castkit.matriz import MODOS_MATRIZ, MatrizError, generar_matriz, validar_modo_matriz
 from castkit.versiones import (
     VersionError,
     cargar_diseno,
@@ -104,6 +110,28 @@ def _construir_parser() -> argparse.ArgumentParser:
         help="Reemplaza sin preguntar la malla ya guardada en la versión actual, si existe.",
     )
 
+    generar = subparsers.add_parser(
+        "generar",
+        help="Genera u obtiene la malla en bruto desde los insumos del brief "
+        "con un proveedor enchufable.",
+    )
+    generar.add_argument("nombre", help="Nombre del diseño (minúsculas, números y guiones).")
+    generar.add_argument(
+        "--proveedor",
+        default=None,
+        help="Proveedor enchufable de generación 3D (si se omite, se usa config/fabricacion.toml).",
+    )
+    generar.add_argument(
+        "--prompt",
+        default=None,
+        help="Texto o prompt de contexto adicional para la generación 3D.",
+    )
+    generar.add_argument(
+        "--reemplazar",
+        action="store_true",
+        help="Reemplaza sin preguntar la malla ya guardada en la versión actual, si existe.",
+    )
+
     limpieza = subparsers.add_parser(
         "limpieza", help="Limpia y escala automáticamente la malla en bruto de un diseño."
     )
@@ -139,6 +167,48 @@ def _construir_parser() -> argparse.ArgumentParser:
         default=None,
         help="Perímetro máximo, en mm, de una zona abierta para cerrarla automáticamente "
         "(si se omite, se usa config/fabricacion.toml).",
+    )
+
+    matriz = subparsers.add_parser(
+        "matriz",
+        help="Genera el STL de la matriz imprimible (modo figura o cubeta multicavidad).",
+    )
+    matriz.add_argument("nombre", help="Nombre del diseño (minúsculas, números y guiones).")
+    matriz.add_argument(
+        "--modo",
+        default=None,
+        help=f"Modo de matriz a generar: {', '.join(MODOS_MATRIZ)} "
+        "(si se omite en terminal interactiva, se pregunta antes de crear).",
+    )
+    matriz.add_argument(
+        "--espesor-base-mm",
+        dest="espesor_base_mm",
+        default=None,
+        help="Espesor de la placa base en mm (si se omite, se usa config/fabricacion.toml).",
+    )
+    matriz.add_argument(
+        "--margen-silicona-mm",
+        dest="margen_silicona_mm",
+        default=None,
+        help="Margen libre de silicona en mm entre figuras y pared (modo cubeta).",
+    )
+    matriz.add_argument(
+        "--espesor-pared-mm",
+        dest="espesor_pared_mm",
+        default=None,
+        help="Grosor de la pared perimetral en mm (modo cubeta).",
+    )
+    matriz.add_argument(
+        "--margen-superior-mm",
+        dest="margen_superior_mm",
+        default=None,
+        help="Margen superior en mm por encima de la figura (modo cubeta).",
+    )
+    matriz.add_argument(
+        "--separacion-cavidades-mm",
+        dest="separacion_cavidades_mm",
+        default=None,
+        help="Separación mínima en mm entre figuras vecinas (modo cubeta).",
     )
 
     return parser
@@ -447,6 +517,144 @@ def _ejecutar_limpieza(args: argparse.Namespace) -> int:
     return 0
 
 
+def _ejecutar_generar(args: argparse.Namespace) -> int:
+    try:
+        carpeta = ubicar_diseno(args.nombre)
+    except (AltaError, VersionError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    datos = cargar_diseno(carpeta)
+    version_actual = datos["version_actual"]
+    nombre_destino = nombre_archivo(datos["nombre"], version_actual, "bruto", "stl")
+    destino = carpeta / "input" / nombre_destino
+
+    reemplazar = args.reemplazar
+    if destino.exists() and not reemplazar:
+        if sys.stdin.isatty():
+            respuesta = (
+                input(f"Esta versión ya tiene una malla ({nombre_destino}). ¿Reemplazarla? (s/N): ")
+                .strip()
+                .lower()
+            )
+            if respuesta in ("s", "si", "sí"):
+                reemplazar = True
+            else:
+                print("No se ha modificado nada.", file=sys.stderr)
+                return 1
+        else:
+            print(
+                f"Error: la versión v{version_actual} de «{args.nombre}» ya tiene una malla "
+                "guardada; usa --reemplazar para sustituirla.",
+                file=sys.stderr,
+            )
+            return 2
+
+    try:
+        resultado = generar_malla(
+            carpeta,
+            proveedor=args.proveedor,
+            prompt=args.prompt,
+            reemplazar=reemplazar,
+        )
+    except (AltaError, VersionError, ConfigError, GeneracionError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    print(
+        f"Malla de «{args.nombre}» generada con «{resultado['proveedor']}» en "
+        f"{resultado['destino']} ({resultado['caras']} caras, {resultado['vertices']} vértices)."
+    )
+    return 0
+
+
+def _ejecutar_matriz(args: argparse.Namespace) -> int:
+    try:
+        carpeta = ubicar_diseno(args.nombre)
+    except (AltaError, VersionError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        config = cargar_config_matriz()
+    except ConfigError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    modo = args.modo
+    if not modo:
+        if sys.stdin.isatty():
+            modo = (
+                input(f"¿Qué tipo de matriz deseas crear ({', '.join(MODOS_MATRIZ)})? ")
+                .strip()
+                .lower()
+            )
+        else:
+            print(
+                "Error: falta la opción obligatoria --modo: indica --modo figura o --modo cubeta.",
+                file=sys.stderr,
+            )
+            return 2
+
+    try:
+        modo = validar_modo_matriz(modo)
+        espesor_base_mm = (
+            _parsear_numero_positivo(args.espesor_base_mm, "--espesor-base-mm")
+            if args.espesor_base_mm is not None
+            else float(config["espesor_base_mm"])
+        )
+        margen_silicona_mm = (
+            _parsear_numero_positivo(args.margen_silicona_mm, "--margen-silicona-mm")
+            if args.margen_silicona_mm is not None
+            else float(config["margen_silicona_mm"])
+        )
+        espesor_pared_mm = (
+            _parsear_numero_positivo(args.espesor_pared_mm, "--espesor-pared-mm")
+            if args.espesor_pared_mm is not None
+            else float(config["espesor_pared_mm"])
+        )
+        margen_superior_mm = (
+            _parsear_numero_positivo(args.margen_superior_mm, "--margen-superior-mm")
+            if args.margen_superior_mm is not None
+            else float(config["margen_superior_mm"])
+        )
+        separacion_cavidades_mm = (
+            _parsear_numero_positivo(args.separacion_cavidades_mm, "--separacion-cavidades-mm")
+            if args.separacion_cavidades_mm is not None
+            else float(config["separacion_cavidades_mm"])
+        )
+    except (AltaError, MatrizError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        resultado = generar_matriz(
+            carpeta,
+            modo=modo,
+            espesor_base_mm=espesor_base_mm,
+            margen_silicona_mm=margen_silicona_mm,
+            espesor_pared_mm=espesor_pared_mm,
+            margen_superior_mm=margen_superior_mm,
+            separacion_cavidades_mm=separacion_cavidades_mm,
+        )
+    except (AltaError, VersionError, MatrizError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    dims = resultado["dimensiones_mm"]
+    extra_silicona = (
+        f", ~{resultado['volumen_silicona_ml']:.1f} ml de silicona"
+        if resultado["volumen_silicona_ml"] is not None
+        else ""
+    )
+    print(
+        f"Matriz ({resultado['modo']}) de «{args.nombre}» guardada en {resultado['destino']} "
+        f"({dims['ancho_mm']} × {dims['fondo_mm']} × {dims['alto_total_mm']} mm"
+        f"{extra_silicona})."
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Punto de entrada de `castkit`."""
     _configurar_salida_utf8()
@@ -459,8 +667,12 @@ def main(argv: list[str] | None = None) -> int:
         return _ejecutar_version(args)
     if args.comando == "ingesta":
         return _ejecutar_ingesta(args)
+    if args.comando == "generar":
+        return _ejecutar_generar(args)
     if args.comando == "limpieza":
         return _ejecutar_limpieza(args)
+    if args.comando == "matriz":
+        return _ejecutar_matriz(args)
 
     parser.print_help(sys.stderr)
     return 2

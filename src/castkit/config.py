@@ -16,6 +16,14 @@ from typing import Any
 from castkit.diseno import AltaError
 
 _CLAVES_LIMPIEZA = ("caras_max", "tolerancia_mm", "corte_base_mm", "agujero_max_mm")
+_CLAVES_GENERACION = ("proveedor", "comando")
+_CLAVES_MATRIZ = (
+    "espesor_base_mm",
+    "margen_silicona_mm",
+    "espesor_pared_mm",
+    "margen_superior_mm",
+    "separacion_cavidades_mm",
+)
 
 # src/castkit/config.py -> src/castkit -> src -> raíz del repositorio.
 _RUTA_POR_DEFECTO = Path(__file__).resolve().parents[2] / "config" / "fabricacion.toml"
@@ -42,14 +50,8 @@ def ruta_config_fabricacion() -> Path:
     return _RUTA_POR_DEFECTO
 
 
-def cargar_config_limpieza() -> dict[str, Any]:
-    """Carga la sección `[limpieza]` de `config/fabricacion.toml`.
-
-    Devuelve un `dict` con las claves `caras_max`, `tolerancia_mm`,
-    `corte_base_mm` y `agujero_max_mm`. Lanza :class:`ConfigError` si el
-    archivo no existe, no se puede leer como TOML, o a la sección
-    `[limpieza]` le falta alguna de esas claves.
-    """
+def _cargar_seccion(nombre_seccion: str, claves_requeridas: tuple[str, ...]) -> dict[str, Any]:
+    """Carga y valida una sección de `config/fabricacion.toml`."""
     ruta = ruta_config_fabricacion()
     if not ruta.is_file():
         raise ConfigError(f'No se encontró el archivo de configuración "{ruta}".')
@@ -60,11 +62,40 @@ def cargar_config_limpieza() -> dict[str, Any]:
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError(f'El archivo de configuración "{ruta}" no es un TOML válido.') from exc
 
-    seccion = datos.get("limpieza", {})
-    faltantes = [clave for clave in _CLAVES_LIMPIEZA if clave not in seccion]
+    seccion = datos.get(nombre_seccion, {})
+    faltantes = [clave for clave in claves_requeridas if clave not in seccion]
     if faltantes:
         raise ConfigError(
-            f'A la sección [limpieza] de "{ruta}" le faltan estas claves: {", ".join(faltantes)}.'
+            f'A la sección [{nombre_seccion}] de "{ruta}" le faltan estas claves: '
+            f"{', '.join(faltantes)}."
         )
 
-    return {clave: seccion[clave] for clave in _CLAVES_LIMPIEZA}
+    return {clave: seccion[clave] for clave in claves_requeridas}
+
+
+def cargar_config_limpieza() -> dict[str, Any]:
+    """Carga la sección `[limpieza]` de `config/fabricacion.toml`.
+
+    Devuelve un `dict` con las claves `caras_max`, `tolerancia_mm`,
+    `corte_base_mm` y `agujero_max_mm`. Lanza :class:`ConfigError` si el
+    archivo no existe, no se puede leer como TOML, o a la sección
+    `[limpieza]` le falta alguna de esas claves.
+    """
+    return _cargar_seccion("limpieza", _CLAVES_LIMPIEZA)
+
+
+def cargar_config_generacion() -> dict[str, Any]:
+    """Carga la sección `[generacion]` de `config/fabricacion.toml`.
+
+    Devuelve un `dict` con las claves `proveedor` y `comando`.
+    """
+    return _cargar_seccion("generacion", _CLAVES_GENERACION)
+
+
+def cargar_config_matriz() -> dict[str, Any]:
+    """Carga la sección `[matriz]` de `config/fabricacion.toml`.
+
+    Devuelve un `dict` con las claves `espesor_base_mm`, `margen_silicona_mm`,
+    `espesor_pared_mm`, `margen_superior_mm` y `separacion_cavidades_mm`.
+    """
+    return _cargar_seccion("matriz", _CLAVES_MATRIZ)

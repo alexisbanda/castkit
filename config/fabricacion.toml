@@ -21,3 +21,34 @@ corte_base_mm = 0.5
 # tras escalarla) para que se cierre automáticamente. Las zonas más grandes
 # impiden cerrar la malla.
 agujero_max_mm = 10
+
+[generacion]
+# Proveedor enchufable por defecto para generar la malla 3D a partir de los
+# insumos del brief (imágenes, documentos .pdf/.ai o texto/prompt).
+proveedor = "comando"
+
+# Comando externo para el proveedor "comando". Se ejecuta pasando la ruta de
+# salida en la variable de entorno CASTKIT_SALIDA_STL (y como último argumento)
+# junto con las rutas de los insumos en CASTKIT_INSUMOS y el prompt en
+# CASTKIT_PROMPT.
+comando = ""
+
+[matriz]
+# Espesor, en milímetros, de la placa base inferior sobre la que apoya la
+# figura (tanto en modo "figura" como en modo "cubeta").
+espesor_base_mm = 3.0
+
+# Margen libre de silicona, en milímetros, entre las figuras y la cara interior
+# de la pared perimetral (modo "cubeta").
+margen_silicona_mm = 10.0
+
+# Grosor, en milímetros, de la pared perimetral exterior (modo "cubeta").
+espesor_pared_mm = 3.0
+
+# Altura libre de silicona, en milímetros, por encima del punto más alto de la
+# figura hasta el borde superior de la pared (modo "cubeta").
+margen_superior_mm = 10.0
+
+# Separación mínima, en milímetros, entre figuras vecinas cuando la versión
+# tiene más de una cavidad (modo "cubeta").
+separacion_cavidades_mm = 10.0

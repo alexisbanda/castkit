@@ -233,6 +233,66 @@ agujero_max_mm = 10
 Cada opción de `castkit limpieza` sobrescribe, una a una, el valor correspondiente de aquí; las
 demás se siguen leyendo de la configuración.
 
+## Generar la malla en bruto desde el brief (con proveedor enchufable)
+
+Cuando el brief contiene imágenes de referencia o generadas con IA (`.png`, `.jpg`, `.jpeg`,
+`.webp`), documentos o archivos de diseño (`.pdf`, `.ai`), texto o prompt (`.txt`, `.md`) o
+incluso un `.stl` opcional, `castkit generar` obtiene o genera automáticamente la malla en bruto:
+
+```bash
+uv run castkit generar guagua-pan --prompt "guagua de pan tradicional sin socavados"
+```
+
+- Si en `guagua-pan/brief/` ya hay un `.stl` y no se fuerza `--proveedor`, lo valida y lo guarda
+  directamente en `guagua-pan/input/guagua-pan_v1_bruto.stl` (`proveedor: "stl-directo"`).
+- Si no hay `.stl`, invoca al **proveedor enchufable** configurado en `[generacion]` de
+  `config/fabricacion.toml` (o el indicado con `--proveedor`), valida que el archivo devuelto sea
+  un STL legible y lo guarda en `input/` registrando el proveedor, los archivos de `brief/`
+  utilizados, el prompt, `sha256`, `caras` y `vertices` en `versiones.v<actual>.parametros.generacion`.
+
+### Opciones de `castkit generar`
+
+| Opción | Obligatoria | Valores aceptados |
+| --- | --- | --- |
+| `nombre` (posicional) | sí | nombre de un diseño ya dado de alta |
+| `--proveedor` | no | nombre del proveedor enchufable registrado o configurado en `config/fabricacion.toml` |
+| `--prompt` | no | texto o prompt de contexto adicional para el generador 3D |
+| `--reemplazar` | no | reemplaza sin preguntar la malla ya guardada en la versión actual, si existe |
+
+## Generar la matriz imprimible (`.stl`) en modo `figura` o `cubeta`
+
+Una vez limpia la malla (`work/<diseño>_v<actual>_limpia.stl`), `castkit matriz` construye el
+archivo `.stl` final de la matriz para mandarlo a la impresora 3D de filamento:
+
+```bash
+# Modo figura: solo la figura apoyada sobre su base plana
+uv run castkit matriz guagua-pan --modo figura
+
+# Modo cubeta: una sola pieza con base + 1 o N figuras (según cavidades) + pared alrededor
+# lista para verter la silicona líquida directamente
+uv run castkit matriz guagua-pan --modo cubeta
+```
+
+Si no se indica `--modo` y la terminal es interactiva, `castkit matriz` pregunta antes de crear:
+`¿Qué tipo de matriz deseas crear (figura, cubeta)?`.
+
+El resultado se guarda en `guagua-pan/output/guagua-pan_v1_matriz.stl` (cerrado y apoyado en
+`z = 0`) y registra en `versiones.v1.parametros.matriz` el modo elegido, las cavidades, los
+parámetros geométricos en mm, las dimensiones exteriores, el volumen de una figura en cm³ y (en
+modo `cubeta`) los mililitros estimados de silicona.
+
+### Opciones de `castkit matriz`
+
+| Opción | Obligatoria | Valores aceptados |
+| --- | --- | --- |
+| `nombre` (posicional) | sí | nombre de un diseño ya dado de alta y con malla limpia |
+| `--modo` | sí (se pregunta si hay terminal) | `figura`, `cubeta` |
+| `--espesor-base-mm` | no | número mayor que 0 (por defecto `3.0` en `config/fabricacion.toml`) |
+| `--margen-silicona-mm` | no | número mayor que 0 (por defecto `10.0` en `config/fabricacion.toml`) |
+| `--espesor-pared-mm` | no | número mayor que 0 (por defecto `3.0` en `config/fabricacion.toml`) |
+| `--margen-superior-mm` | no | número mayor que 0 (por defecto `10.0` en `config/fabricacion.toml`) |
+| `--separacion-cavidades-mm` | no | número mayor que 0 (por defecto `10.0` en `config/fabricacion.toml`) |
+
 ## Integración continua
 
 GitHub Actions ejecuta en cada pull request y en cada push a `main`, en Linux, macOS y Windows: `uv sync --locked`, `uv run ruff check`, `uv run ruff format --check` y `uv run pytest`. Solo el job de Linux instala la versión de Blender fijada en `.blender-version` y corre los tests marcados `blender`; en macOS y Windows esos tests se saltan.
