@@ -165,7 +165,10 @@ def _cerrar_huecos(malla: trimesh.Trimesh, agujero_max_mm: float) -> list[dict[s
     (para excluir luego sus zonas de la medición de distancia). Si alguno de
     los huecos supera ``agujero_max_mm`` de perímetro, no cierra nada y lanza
     :class:`LimpiezaError` listando todas las zonas abiertas, su posición y
-    tamaño aproximados, y los siguientes pasos posibles.
+    tamaño aproximados, y los siguientes pasos posibles. Si todos caben pero
+    alguno no se puede cerrar (por ejemplo, por no ser una zona simple), lanza
+    la misma clase de error listando las zonas que quedaron abiertas tras el
+    intento, su posición y tamaño aproximados, y los siguientes pasos.
     """
     huecos = _detectar_huecos(malla)
     if not huecos:
@@ -183,11 +186,22 @@ def _cerrar_huecos(malla: trimesh.Trimesh, agujero_max_mm: float) -> list[dict[s
             '"castkit ingesta" con una malla nueva.'
         )
 
-    if not trimesh.repair.fill_holes(malla):
+    # `use_fan=True` triangula cada hueco en abanico desde su centroide, lo
+    # que permite cerrar huecos de cualquier número de aristas (por defecto,
+    # `use_fan=False` solo cierra huecos de 3 o 4 aristas). En huecos no
+    # convexos el abanico puede generar caras degeneradas o que se cruzan;
+    # las comprobaciones posteriores de `limpiar_malla` (watertight, normales
+    # consistentes, volumen positivo y distancia contra la tolerancia) vigilan
+    # ese caso y rechazan el resultado si algo queda mal.
+    exito = trimesh.repair.fill_holes(malla, use_fan=True)
+    huecos_restantes = _detectar_huecos(malla) if not exito else []
+    if not exito or huecos_restantes:
         raise LimpiezaError(
-            f"La malla tiene {len(huecos)} zona(s) abierta(s) dentro del tamaño permitido "
-            "pero no se pudieron cerrar (es posible que alguna no sea una zona simple, por "
-            "ejemplo si no es convexa). Siguientes pasos: corrige el modelo y vuelve a hacer "
+            f"La malla tiene {len(huecos)} zona(s) abierta(s) dentro del tamaño permitido, pero "
+            f"{len(huecos_restantes) or len(huecos)} no se pudieron cerrar (es posible que no "
+            "sean zonas simples, por ejemplo si no son convexas):\n"
+            f"{_formatear_zonas(huecos_restantes or huecos)}\n"
+            "Siguientes pasos: corrige el modelo y vuelve a hacer "
             '"castkit ingesta" con una malla nueva.'
         )
 
