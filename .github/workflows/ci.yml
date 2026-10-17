@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Instalar uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Instalar dependencias
+        run: uv sync --locked
+
+      - name: Leer versión de Blender requerida
+        if: runner.os == 'Linux'
+        id: blender-version
+        run: echo "version=$(cat .blender-version)" >> "$GITHUB_OUTPUT"
+
+      - name: Cachear descarga de Blender
+        if: runner.os == 'Linux'
+        id: cache-blender
+        uses: actions/cache@v4
+        with:
+          path: ~/blender-download
+          key: blender-${{ steps.blender-version.outputs.version }}-linux-x64
+
+      - name: Instalar librerías del sistema para Blender headless
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxi6 libxxf86vm1 libxfixes3 libxrender1 libgl1 libxkbcommon0 libsm6
+
+      - name: Descargar y descomprimir Blender
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.blender-version.outputs.version }}"
+          MAJOR_MINOR="$(echo "$VERSION" | cut -d. -f1,2)"
+          mkdir -p ~/blender-download
+          ARCHIVE="$HOME/blender-download/blender-${VERSION}-linux-x64.tar.xz"
+          if [ ! -f "$ARCHIVE" ]; then
+            curl -sL "https://download.blender.org/release/Blender${MAJOR_MINOR}/blender-${VERSION}-linux-x64.tar.xz" -o "$ARCHIVE"
+          fi
+          mkdir -p "$HOME/blender-${VERSION}"
+          tar -xf "$ARCHIVE" -C "$HOME/blender-${VERSION}" --strip-components=1
+          echo "BLENDER_BIN=$HOME/blender-${VERSION}/blender" >> "$GITHUB_ENV"
+
+      - name: Lint (ruff check)
+        run: uv run ruff check
+
+      - name: Formato (ruff format --check)
+        run: uv run ruff format --check
+
+      - name: Tests
+        run: uv run pytest -rs
