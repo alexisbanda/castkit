@@ -201,7 +201,8 @@ def test_limpieza_usa_respaldo_de_blender_cuando_python_no_cierra_la_malla(
     err2 = capsys.readouterr().err
     assert "BLENDER_BIN" not in err2
 
-    # 3. Simulando que Blender está disponible y remalla devolviendo un cubo cerrado
+    # 3. Con Blender disponible pero un remallado que deforma la figura (una
+    # caja), la limpieza lo rechaza: la fidelidad se mide contra la original.
     monkeypatch.setattr(mod_blender, "find_blender", lambda: Path("/usr/bin/blender"))
 
     def _fake_blender(malla: trimesh.Trimesh, voxel_mm: float) -> trimesh.Trimesh:
@@ -211,12 +212,8 @@ def test_limpieza_usa_respaldo_de_blender_cuando_python_no_cierra_la_malla(
 
     monkeypatch.setattr(mod_limpieza, "_remallar_con_blender", _fake_blender)
     rc = main(["limpieza", "pieza-rota", "--voxel-mm", "0.25"])
-    assert rc == 0
-
-    datos = cargar_diseno(disenos_dir / "pieza-rota")
-    reg = datos["versiones"]["v1"]["parametros"]["limpieza"]
-    assert reg["metodo"] == "blender"
-    assert reg["voxel_mm"] == pytest.approx(0.25)
+    assert rc != 0
+    assert "deformó la figura" in capsys.readouterr().err
 
 
 def test_proveedores_fal_y_tripo3d_validan_api_key_y_descargan_stl(

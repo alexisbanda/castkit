@@ -424,6 +424,22 @@ class ProveedorImagen3D:
         malla.export(destino_stl, file_type="stl")
 
 
+def _partir_comando(comando: str, posix: bool = os.name != "nt") -> list[str]:
+    """Separa `comando` en argumentos respetando las rutas de Windows.
+
+    En modo POSIX, `shlex` trata `\\` como escape y rompe rutas como
+    `C:\\Users\\...`; en Windows se usa el modo no POSIX y se quitan las
+    comillas que envuelven cada argumento.
+    """
+    if posix:
+        return shlex.split(comando)
+    partes = shlex.split(comando, posix=False)
+    return [
+        parte[1:-1] if len(parte) >= 2 and parte[0] == parte[-1] and parte[0] in "\"'" else parte
+        for parte in partes
+    ]
+
+
 class ProveedorComando:
     """Proveedor enchufable que ejecuta un comando o script externo configurable.
 
@@ -451,7 +467,7 @@ class ProveedorComando:
                 "[generacion] de config/fabricacion.toml."
             )
 
-        partes = shlex.split(self.comando)
+        partes = _partir_comando(self.comando)
         rutas_insumos = [str(ruta) for ruta in insumos.rutas_para_proveedor()]
         entorno = os.environ.copy()
         entorno["CASTKIT_SALIDA_STL"] = str(destino_stl)

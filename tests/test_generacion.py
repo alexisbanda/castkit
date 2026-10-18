@@ -13,6 +13,7 @@ from castkit.cli import main
 from castkit.diseno import DatosAlta, crear_diseno
 from castkit.generacion import (
     InsumosBrief,
+    _partir_comando,
     desregistrar_proveedor,
     recolectar_insumos_brief,
     registrar_proveedor,
@@ -207,6 +208,18 @@ def test_generar_con_proveedor_comando_configurado_en_toml(
     rc = main(["generar", "guagua-pan"])
     assert rc == 0
     assert (carpeta / "input" / "guagua-pan_v1_bruto.stl").is_file()
+
+
+def test_partir_comando_conserva_rutas_de_windows() -> None:
+    comando = r'D:\a\castkit\.venv\Scripts\python.exe "C:\Users\runner admin\gen_stl.py" --x'
+
+    partes = _partir_comando(comando, posix=False)
+
+    assert partes == [
+        r"D:\a\castkit\.venv\Scripts\python.exe",
+        r"C:\Users\runner admin\gen_stl.py",
+        "--x",
+    ]
 
 
 def test_generar_falla_si_no_hay_insumos_soportados_en_brief(

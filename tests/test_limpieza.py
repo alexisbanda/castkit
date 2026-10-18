@@ -405,7 +405,7 @@ def test_malla_no_cerrable_falla_sin_escribir_archivo(
     _dar_alta("guagua-pan", brief_dir, alto_mm=alto_mm)
     assert main(_argv_ingesta("guagua-pan", str(ROTA_STL))) == 0
 
-    codigo = main(_argv_limpieza("guagua-pan"))
+    codigo = main([*_argv_limpieza("guagua-pan"), "--sin-blender"])
 
     assert codigo != 0
     destino = disenos_dir / "guagua-pan" / "work" / "guagua-pan_v1_limpia.stl"
@@ -455,7 +455,7 @@ def test_huecos_dentro_del_tamano_pero_no_cerrables_falla_con_zonas_y_siguientes
     _dar_alta("guagua-pan", brief_dir, alto_mm=alto_mm)
     assert main(_argv_ingesta("guagua-pan", str(AGUJEROS_STL))) == 0
 
-    codigo = main(_argv_limpieza("guagua-pan"))
+    codigo = main([*_argv_limpieza("guagua-pan"), "--sin-blender"])
 
     assert codigo != 0
     destino = disenos_dir / "guagua-pan" / "work" / "guagua-pan_v1_limpia.stl"
@@ -528,7 +528,7 @@ def test_agujero_max_mm_mas_estricto_rechaza_huecos_que_antes_pasaban(
     assert main(_argv_limpieza("guagua-pan")) == 0
 
     # Con un --agujero-max-mm más chico que esos huecos (~6.3 mm), fallan.
-    codigo = main(_argv_limpieza("guagua-pan", agujero_max_mm="5"))
+    codigo = main([*_argv_limpieza("guagua-pan", agujero_max_mm="5"), "--sin-blender"])
     assert codigo != 0
 
 
@@ -555,3 +555,109 @@ def test_reejecutar_limpieza_reemplaza_archivo_y_avisa(
 
     datos = cargar_diseno(disenos_dir / "guagua-pan")
     assert datos["versiones"]["v1"]["parametros"]["limpieza"]["caras_max"] == 40
+
+
+# ---------------------------------------------------------------------------
+# Criterio (#22): el respaldo de Blender solo se acepta si la malla remallada
+# sigue fiel a la original (distancia ≤ tolerancia_mm medida contra la
+# original, no contra la propia malla remallada).
+# ---------------------------------------------------------------------------
+
+
+def _blender_disponible(monkeypatch: pytest.MonkeyPatch) -> None:
+    import castkit.blender as mod_blender
+
+    monkeypatch.setattr(mod_blender, "find_blender", lambda: Path("/usr/bin/blender"))
+
+
+def test_respaldo_blender_que_deforma_la_figura_falla_sin_escribir_archivo(
+    disenos_dir: Path,
+    brief_dir: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import castkit.limpieza as mod_limpieza
+
+    def _remallado_que_devuelve_una_caja(
+        malla: trimesh.Trimesh, voxel_mm: float
+    ) -> trimesh.Trimesh:
+        caja = trimesh.creation.box(extents=malla.extents)
+        caja.apply_translation(malla.bounds[0] - caja.bounds[0])
+        return caja
+
+    _blender_disponible(monkeypatch)
+    monkeypatch.setattr(mod_limpieza, "_remallar_con_blender", _remallado_que_devuelve_una_caja)
+    _dar_alta("guagua-pan", brief_dir, alto_mm=13.5)
+    assert main(_argv_ingesta("guagua-pan", str(ROTA_STL))) == 0
+
+    codigo = main(_argv_limpieza("guagua-pan"))
+
+    assert codigo != 0
+    assert not (disenos_dir / "guagua-pan" / "work" / "guagua-pan_v1_limpia.stl").exists()
+    error = capsys.readouterr().err
+    assert "deformó la figura" in error
+    assert "mm" in error
+
+
+def test_respaldo_blender_fiel_se_acepta_y_registra_metodo_y_distancia(
+    disenos_dir: Path, brief_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import castkit.limpieza as mod_limpieza
+
+    rellenar_de_verdad = trimesh.repair.fill_holes
+
+    def _remallado_fiel(malla: trimesh.Trimesh, voxel_mm: float) -> trimesh.Trimesh:
+        cerrada = malla.copy()
+        rellenar_de_verdad(cerrada, use_fan=True)
+        trimesh.repair.fix_normals(cerrada)
+        return cerrada
+
+    # Python "no consigue" cerrar agujeros.stl y Blender devuelve la misma
+    # figura con los huecos rellenos.
+    monkeypatch.setattr(trimesh.repair, "fill_holes", lambda malla, **kwargs: False)
+    _blender_disponible(monkeypatch)
+    monkeypatch.setattr(mod_limpieza, "_remallar_con_blender", _remallado_fiel)
+    _dar_alta("guagua-pan", brief_dir, alto_mm=13.5)
+    assert main(_argv_ingesta("guagua-pan", str(AGUJEROS_STL))) == 0
+
+    codigo = main([*_argv_limpieza("guagua-pan"), "--voxel-mm", "0.25"])
+
+    assert codigo == 0
+    destino = disenos_dir / "guagua-pan" / "work" / "guagua-pan_v1_limpia.stl"
+    assert trimesh.load(destino, force="mesh").is_watertight
+    registro = cargar_diseno(disenos_dir / "guagua-pan")["versiones"]["v1"]["parametros"][
+        "limpieza"
+    ]
+    assert registro["metodo"] == "blender"
+    assert registro["voxel_mm"] == pytest.approx(0.25)
+    assert registro["distancia_max_mm"] <= registro["tolerancia_mm"]
+
+
+@pytest.mark.blender
+def test_respaldo_blender_real_nunca_escribe_una_figura_deformada(
+    disenos_dir: Path, brief_dir: Path
+) -> None:
+    """Con Blender real, el respaldo o deja una figura fiel o falla sin escribir."""
+    _dar_alta("guagua-pan", brief_dir, alto_mm=13.5)
+    assert main(_argv_ingesta("guagua-pan", str(ROTA_STL))) == 0
+
+    codigo = main(_argv_limpieza("guagua-pan"))
+
+    destino = disenos_dir / "guagua-pan" / "work" / "guagua-pan_v1_limpia.stl"
+    if codigo != 0:
+        assert not destino.exists()
+        return
+    registro = cargar_diseno(disenos_dir / "guagua-pan")["versiones"]["v1"]["parametros"][
+        "limpieza"
+    ]
+    assert registro["metodo"] == "blender"
+    assert registro["distancia_max_mm"] <= registro["tolerancia_mm"]
+    limpia = trimesh.load(destino, force="mesh")
+    assert limpia.is_watertight
+    # Comprobación independiente del registro: la pieza conserva el tamaño
+    # de la figura original escalada (alto_mm, y ancho y fondo en proporción).
+    original = trimesh.load(ROTA_STL, file_type="stl", force="mesh")
+    original.apply_scale((13.5 + 0.5) / float(original.extents[2]))
+    tolerancia = registro["tolerancia_mm"]
+    assert limpia.extents[2] == pytest.approx(13.5, abs=tolerancia)
+    assert limpia.extents[:2] == pytest.approx(original.extents[:2], abs=tolerancia)
