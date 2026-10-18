@@ -259,6 +259,36 @@ uv run castkit generar guagua-pan --prompt "guagua de pan tradicional sin socava
 | `--prompt` | no | texto o prompt de contexto adicional para el generador 3D |
 | `--reemplazar` | no | reemplaza sin preguntar la malla ya guardada en la versión actual, si existe |
 
+## Punto de control 1: renders de las 4 vistas y aprobación (`castkit control1`)
+
+Antes de imprimir o pasar a la caja de molde (`castkit matriz`), `castkit control1` genera sin abrir interfaz gráfica cuatro imágenes PNG de la malla limpia de la versión actual (`frente`, `perfil`, `arriba` y `3-4`) en `output/`, con las medidas finales de **alto, ancho y fondo en mm** sobreimpresas de forma legible:
+
+```bash
+# Generar las 4 vistas y aprobar la versión actual
+uv run castkit control1 guagua-pan --aprobar
+
+# Rechazar la versión actual registrando el motivo (bloquea el paso a la matriz)
+uv run castkit control1 guagua-pan --rechazar --motivo "la cara quedó aplastada"
+```
+
+Los cuatro archivos se guardan en `output/` nombrados con la versión actual:
+- `guagua-pan_v1_render-frente.png`
+- `guagua-pan_v1_render-perfil.png`
+- `guagua-pan_v1_render-arriba.png`
+- `guagua-pan_v1_render-3-4.png`
+
+La decisión (`aprobado`, `rechazado` con motivo obligatorio, o `pendiente`) y la fecha quedan registradas en `versiones.v1.parametros.control_1` dentro de `diseno.json`. Mientras el punto de control 1 esté pendiente o rechazado, `castkit matriz` rechaza generar la matriz e informa del motivo.
+
+### Opciones de `castkit control1`
+
+| Opción | Obligatoria | Valores aceptados |
+| --- | --- | --- |
+| `nombre` (posicional) | sí | nombre de un diseño ya dado de alta y con malla limpia |
+| `--aprobar` | no | aprueba el punto de control 1 y habilita el paso a `castkit matriz` |
+| `--rechazar` | no | rechaza el punto de control 1 y deja el diseño sin avanzar |
+| `--motivo` | sí (si se usa `--rechazar`) | texto libre explicando qué corregir |
+| `--sin-blender` | no | genera las 4 vistas PNG con el renderizador de Python sin invocar a Blender |
+
 ## Generar la matriz imprimible (`.stl`) en modo `figura` o `cubeta`
 
 Una vez limpia la malla (`work/<diseño>_v<actual>_limpia.stl`), `castkit matriz` construye el

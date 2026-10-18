@@ -27,6 +27,7 @@ import manifold3d
 import numpy as np
 import trimesh
 
+from castkit.control1 import Control1Error, verificar_control1_para_matriz
 from castkit.versiones import (
     VersionError,
     cargar_diseno,
@@ -130,6 +131,7 @@ def generar_matriz(
     espesor_pared_mm: float,
     margen_superior_mm: float,
     separacion_cavidades_mm: float,
+    exigir_control1: bool = False,
 ) -> dict[str, Any]:
     """Construye y guarda `output/<diseño>_v<actual>_matriz.stl` en modo `figura` o `cubeta`."""
     validar_modo_matriz(modo)
@@ -153,6 +155,11 @@ def generar_matriz(
 
     carpeta = Path(carpeta)
     datos = cargar_diseno(carpeta)
+    try:
+        verificar_control1_para_matriz(carpeta, datos, exigir_control1=exigir_control1)
+    except Control1Error as exc:
+        raise MatrizError(str(exc)) from exc
+
     nombre_diseno = datos["nombre"]
     version_actual = datos["version_actual"]
     info_version = datos_version(datos, version_actual)

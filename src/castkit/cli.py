@@ -15,6 +15,11 @@ from castkit.config import (
     cargar_config_matriz,
     cargar_config_mecha,
 )
+from castkit.control1 import (
+    Control1Error,
+    ejecutar_control1,
+    registrar_decision_control1,
+)
 from castkit.diseno import (
     LICENCIAS,
     MATERIALES,
@@ -206,6 +211,33 @@ def _construir_parser() -> argparse.ArgumentParser:
         help="Continúa sin preguntar aunque el espesor de pared quede bajo el mínimo.",
     )
 
+    control1 = subparsers.add_parser(
+        "control1",
+        help="Genera las 4 vistas PNG del punto de control 1 con medidas y registra su decisión.",
+    )
+    control1.add_argument("nombre", help="Nombre del diseño (minúsculas, números y guiones).")
+    control1.add_argument(
+        "--aprobar",
+        action="store_true",
+        help="Aprueba la figura en el punto de control 1 para habilitar el paso a la matriz.",
+    )
+    control1.add_argument(
+        "--rechazar",
+        action="store_true",
+        help="Rechaza la figura en el punto de control 1 (requiere --motivo).",
+    )
+    control1.add_argument(
+        "--motivo",
+        default=None,
+        help="Motivo del rechazo en el punto de control 1 (qué corregir).",
+    )
+    control1.add_argument(
+        "--sin-blender",
+        dest="sin_blender",
+        action="store_true",
+        help="Genera las vistas en PNG con el renderizador de Python sin invocar a Blender.",
+    )
+
     matriz = subparsers.add_parser(
         "matriz",
         help="Genera el STL de la matriz imprimible (modo figura o cubeta multicavidad).",
@@ -250,7 +282,7 @@ def _construir_parser() -> argparse.ArgumentParser:
 
     flujo = subparsers.add_parser(
         "flujo",
-        help="Ejecuta en cadena generar -> limpieza -> mecha (si es cera) -> matriz.",
+        help="Ejecuta en cadena generar -> limpieza -> mecha (si es cera) -> control1 -> matriz.",
     )
     flujo.add_argument("nombre", help="Nombre del diseño ya dado de alta.")
     flujo.add_argument(
@@ -702,6 +734,98 @@ def _ejecutar_mecha(args: argparse.Namespace) -> int:
     return 0
 
 
+def _ejecutar_control1(args: argparse.Namespace) -> int:
+    try:
+        carpeta = ubicar_diseno(args.nombre)
+    except (AltaError, VersionError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    aprobar = bool(getattr(args, "aprobar", False))
+    rechazar = bool(getattr(args, "rechazar", False))
+    if aprobar and rechazar:
+        print(
+            "Error: no puedes usar --aprobar y --rechazar al mismo tiempo.",
+            file=sys.stderr,
+        )
+        return 1
+
+    decision: str | None = None
+    motivo: str | None = getattr(args, "motivo", None)
+
+    if aprobar:
+        decision = "aprobado"
+        motivo = None
+    elif rechazar:
+        decision = "rechazado"
+        if motivo is None and sys.stdin.isatty():
+            motivo = input("Motivo del rechazo: ").strip()
+        if not motivo or not motivo.strip():
+            print(
+                "Error: falta la opción obligatoria --motivo: para rechazar el punto de "
+                "control 1 debes explicar qué corregir.",
+                file=sys.stderr,
+            )
+            return 2 if getattr(args, "motivo", None) is None else 1
+
+    try:
+        resultado = ejecutar_control1(
+            carpeta,
+            decision=decision,
+            motivo=motivo,
+            sin_blender=bool(getattr(args, "sin_blender", False)),
+        )
+    except (AltaError, VersionError, Control1Error) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    dims = resultado["dimensiones_mm"]
+    rutas_str = ", ".join(str(r) for r in resultado["renders"])
+    print(
+        f"Renders del punto de control 1 de «{args.nombre}» (v{resultado['version']}) "
+        f"generados en: {rutas_str} "
+        f"(Alto: {dims['alto_mm']:.1f} mm, Ancho: {dims['ancho_mm']:.1f} mm, "
+        f"Fondo: {dims['fondo_mm']:.1f} mm)."
+    )
+
+    if decision is None and sys.stdin.isatty():
+        respuesta = input("¿Apruebas la figura en el punto de control 1? (s/N): ").strip().lower()
+        if respuesta in ("s", "si", "sí"):
+            reg = registrar_decision_control1(carpeta, decision="aprobado")
+            resultado["estado"] = reg["estado"]
+            resultado["fecha"] = reg["fecha"]
+        else:
+            motivo_input = input("Motivo del rechazo: ").strip()
+            if not motivo_input:
+                print(
+                    "Error: para rechazar el punto de control 1 debes indicar un motivo.",
+                    file=sys.stderr,
+                )
+                return 1
+            reg = registrar_decision_control1(carpeta, decision="rechazado", motivo=motivo_input)
+            resultado["estado"] = reg["estado"]
+            resultado["motivo"] = reg["motivo"]
+            resultado["fecha"] = reg["fecha"]
+
+    if resultado["estado"] == "aprobado":
+        print(
+            f"Punto de control 1 aprobado para «{args.nombre}» "
+            f"(v{resultado['version']}, {resultado['fecha']})."
+        )
+    elif resultado["estado"] == "rechazado":
+        print(
+            f"Punto de control 1 rechazado para «{args.nombre}» "
+            f"(v{resultado['version']}): {resultado['motivo']}"
+        )
+    else:
+        print(
+            f"Punto de control 1 pendiente de decisión para «{args.nombre}» "
+            f"(v{resultado['version']}). Usa --aprobar o --rechazar --motivo <texto>."
+        )
+
+    return 0
+
+
 def _ejecutar_matriz(args: argparse.Namespace) -> int:
     try:
         carpeta = ubicar_diseno(args.nombre)
@@ -818,6 +942,17 @@ def _ejecutar_flujo(args: argparse.Namespace) -> int:
     if rc_mecha != 0:
         return rc_mecha
 
+    args_control1 = argparse.Namespace(
+        nombre=args.nombre,
+        aprobar=not sys.stdin.isatty(),
+        rechazar=False,
+        motivo=None,
+        sin_blender=False,
+    )
+    rc_c1 = _ejecutar_control1(args_control1)
+    if rc_c1 != 0:
+        return rc_c1
+
     args_matriz = argparse.Namespace(
         nombre=args.nombre,
         modo=args.modo,
@@ -848,6 +983,8 @@ def main(argv: list[str] | None = None) -> int:
         return _ejecutar_limpieza(args)
     if args.comando == "mecha":
         return _ejecutar_mecha(args)
+    if args.comando == "control1":
+        return _ejecutar_control1(args)
     if args.comando == "matriz":
         return _ejecutar_matriz(args)
     if args.comando == "flujo":
