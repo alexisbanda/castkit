@@ -276,7 +276,7 @@ limpia (solo registra que no se aplicó, junto con el material). Si es `cera`:
 2. Si ese espesor es menor que `espesor_minimo_pared_mm` y no se pasa `--forzar`, se detiene: en
    una terminal interactiva pregunta si continuar; sin terminal, falla indicando el espesor
    medido.
-3. Resta el cilindro de la malla limpia (unión booleana con `manifold3d`) y comprueba que el
+3. Resta el cilindro de la malla limpia (resta booleana con `manifold3d`) y comprueba que el
    resultado siga cerrado (watertight) y con volumen positivo.
 4. Reemplaza `work/<diseño>_v<actual>_limpia.stl` con la malla ya perforada.
 
@@ -464,9 +464,10 @@ demás se siguen leyendo de la configuración.
 
 ## Ejecutar el flujo completo (`castkit flujo`)
 
-`castkit flujo` encadena, para un diseño ya dado de alta, `generar` → `limpieza` → `mecha` (solo
-si el material del diseño es `cera`) → `control1` → `matriz`, deteniéndose en el primer paso que
-falle:
+`castkit flujo` encadena, para un diseño ya dado de alta, `generar` → `limpieza` → `mecha` →
+`control1` → `matriz`, deteniéndose en el primer paso que falle. El paso `mecha` siempre se
+ejecuta; si el material del diseño no es `cera`, no modifica la malla y solo registra
+`aplicado: false`.
 
 ```bash
 # Interactivo: pregunta por la aprobación del punto de control 1 antes de generar la matriz
