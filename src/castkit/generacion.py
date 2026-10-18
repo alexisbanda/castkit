@@ -16,7 +16,6 @@ contrario, se delega la creación del `.stl` en un **proveedor enchufable**
 
 from __future__ import annotations
 
-import base64
 import json
 import math
 import mimetypes
@@ -123,66 +122,6 @@ def _descargar_y_convertir_a_stl(url_modelo: str, destino_stl: Path) -> None:
         ) from exc
     finally:
         tmp_path.unlink(missing_ok=True)
-
-
-class ProveedorFal:
-    """Proveedor enchufable para Fal.ai (p. ej. `fal-ai/trellis` o `fal-ai/hunyuan3d/v2/mini`).
-
-    Lee la clave de la variable de entorno ``FAL_KEY``.
-    """
-
-    def __init__(self, endpoint: str = "fal-ai/trellis") -> None:
-        self.endpoint = endpoint.strip() or "fal-ai/trellis"
-
-    def generar(self, insumos: InsumosBrief, destino_stl: Path) -> None:
-        api_key = os.environ.get("FAL_KEY", "").strip()
-        if not api_key:
-            raise GeneracionError(
-                'El proveedor "fal" requiere la variable de entorno FAL_KEY '
-                '(por ejemplo: export FAL_KEY="tu-api-key").'
-            )
-        if not insumos.imagenes:
-            raise GeneracionError(
-                'El proveedor "fal" requiere al menos una imagen (.png, .jpg, .webp) en brief/.'
-            )
-
-        img = insumos.imagenes[0]
-        mime = mimetypes.guess_type(img.name)[0] or "image/png"
-        b64 = base64.b64encode(img.read_bytes()).decode("ascii")
-        payload: dict[str, Any] = {"image_url": f"data:{mime};base64,{b64}"}
-        if insumos.prompt:
-            payload["prompt"] = insumos.prompt
-
-        url = f"https://fal.run/{self.endpoint}"
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Authorization": f"Key {api_key}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=300) as resp:
-                datos = json.loads(resp.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            cuerpo = exc.read().decode("utf-8", errors="replace")
-            raise GeneracionError(f'Error HTTP {exc.code} del proveedor "fal": {cuerpo}') from exc
-        except Exception as exc:
-            raise GeneracionError(f'Error al conectar con el proveedor "fal": {exc}') from exc
-
-        url_modelo = (
-            (datos.get("model_mesh") or {}).get("url")
-            or (datos.get("mesh") or {}).get("url")
-            or datos.get("model_url")
-        )
-        if not url_modelo:
-            raise GeneracionError(
-                f'La respuesta de "fal" no incluyó ninguna URL de malla 3D: {datos}'
-            )
-
-        _descargar_y_convertir_a_stl(str(url_modelo), destino_stl)
 
 
 _TRIPO_V3_BASE = "https://openapi.tripo3d.ai"
@@ -597,7 +536,7 @@ def obtener_proveedor(
     """Devuelve la instancia del proveedor ``nombre``.
 
     Busca primero en los proveedores registrados con :func:`registrar_proveedor`
-    y luego en los proveedores integrados (`"comando"`, `"imagen-3d"`, `"fal"`, `"tripo3d"`).
+    y luego en los proveedores integrados (`"comando"`, `"imagen-3d"`, `"tripo3d"`).
     Lanza :class:`GeneracionError` si el nombre no corresponde a ningún proveedor.
     """
     if nombre in _PROVEEDORES_REGISTRADOS:
@@ -608,8 +547,6 @@ def obtener_proveedor(
         return ProveedorComando(str(comando))
     if nombre == "imagen-3d":
         return ProveedorImagen3D()
-    if nombre == "fal":
-        return ProveedorFal()
     if nombre == "tripo3d":
         cfg = config_generacion or {}
         return ProveedorTripo3D(
@@ -617,9 +554,7 @@ def obtener_proveedor(
             espera_max_s=float(cfg.get("tripo_espera_max_s", 600.0)),
         )
 
-    disponibles = sorted(
-        {"comando", "imagen-3d", "fal", "tripo3d", *_PROVEEDORES_REGISTRADOS.keys()}
-    )
+    disponibles = sorted({"comando", "imagen-3d", "tripo3d", *_PROVEEDORES_REGISTRADOS.keys()})
     raise GeneracionError(
         f'El proveedor de generación 3D "{nombre}" no está registrado. '
         f"Proveedores disponibles: {', '.join(disponibles)}."
