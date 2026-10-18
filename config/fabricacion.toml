@@ -37,6 +37,13 @@ proveedor = "comando"
 # CASTKIT_PROMPT.
 comando = ""
 
+# Versión del modelo de Tripo3D (API v3) usada por el proveedor "tripo3d".
+tripo_modelo = "v2.5-20250123"
+
+# Plazo máximo, en segundos, que el proveedor "tripo3d" espera a que la
+# tarea termine antes de fallar.
+tripo_espera_max_s = 600
+
 [mecha]
 # Diámetro, en milímetros, del canal de mecha vertical para figuras de cera.
 diametro_mecha_mm = 3.0
