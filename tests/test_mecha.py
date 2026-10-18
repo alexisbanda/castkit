@@ -278,6 +278,7 @@ def test_proveedores_fal_y_tripo3d_validan_api_key_y_descargan_stl(
 def test_flujo_completo_genera_matriz_y_ficha_tecnica_en_espanol(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    blender_falso: object,
 ) -> None:
     disenos_dir = tmp_path / "disenos"
     disenos_dir.mkdir()
@@ -314,6 +315,7 @@ def test_flujo_sin_terminal_se_detiene_en_control1_sin_aprobar(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    blender_falso: object,
 ) -> None:
     disenos_dir = tmp_path / "disenos"
     disenos_dir.mkdir()

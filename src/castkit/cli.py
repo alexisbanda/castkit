@@ -232,12 +232,6 @@ def _construir_parser() -> argparse.ArgumentParser:
         default=None,
         help="Motivo del rechazo en el punto de control 1 (qué corregir).",
     )
-    control1.add_argument(
-        "--sin-blender",
-        dest="sin_blender",
-        action="store_true",
-        help="Genera las vistas en PNG con el renderizador de Python sin invocar a Blender.",
-    )
 
     matriz = subparsers.add_parser(
         "matriz",
@@ -780,7 +774,6 @@ def _ejecutar_control1(args: argparse.Namespace) -> int:
             carpeta,
             decision=decision,
             motivo=motivo,
-            sin_blender=bool(getattr(args, "sin_blender", False)),
         )
     except (AltaError, VersionError, Control1Error) as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -954,7 +947,6 @@ def _ejecutar_flujo(args: argparse.Namespace) -> int:
         aprobar=bool(getattr(args, "aprobar_control1", False)),
         rechazar=False,
         motivo=None,
-        sin_blender=False,
     )
     rc_c1 = _ejecutar_control1(args_control1)
     if rc_c1 != 0:
