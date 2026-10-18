@@ -1,13 +1,19 @@
-"""Tests de `castkit generar` y del módulo `castkit.generacion` (ticket #25)."""
+"""Tests de `castkit generar` y del módulo `castkit.generacion` (ticket #25, #36)."""
 
 from __future__ import annotations
 
+import io
+import json
 import shutil
 import sys
+import time
+import urllib.error
+import urllib.request
 from datetime import date
 from pathlib import Path
 
 import pytest
+import trimesh
 
 from castkit.cli import main
 from castkit.diseno import DatosAlta, crear_diseno
@@ -23,6 +29,54 @@ from castkit.versiones import cargar_diseno
 
 FIXTURES = Path(__file__).parent / "fixtures"
 CUBE_STL = FIXTURES / "cube.stl"
+
+
+class _FakeHTTPResp:
+    """Respuesta simulada de `urllib.request.urlopen` (compatible con `with`)."""
+
+    def __init__(self, payload: bytes) -> None:
+        self._buf = io.BytesIO(payload)
+
+    def read(self) -> bytes:
+        return self._buf.read()
+
+    def __enter__(self) -> _FakeHTTPResp:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        pass
+
+
+def _escribir_toml_tripo(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    tripo_modelo: str | None = None,
+    tripo_espera_max_s: float | None = None,
+) -> None:
+    """Escribe un `fabricacion.toml` propio con `[generacion]` apuntando a tripo3d."""
+    lineas_generacion = ["[generacion]", 'proveedor = "tripo3d"', 'comando = ""']
+    if tripo_modelo is not None:
+        lineas_generacion.append(f'tripo_modelo = "{tripo_modelo}"')
+    if tripo_espera_max_s is not None:
+        lineas_generacion.append(f"tripo_espera_max_s = {tripo_espera_max_s}")
+
+    toml_custom = tmp_path / "fabricacion.toml"
+    toml_custom.write_text(
+        "[limpieza]\n"
+        "caras_max = 200000\n"
+        "tolerancia_mm = 0.2\n"
+        "corte_base_mm = 0.5\n"
+        "agujero_max_mm = 10\n\n" + "\n".join(lineas_generacion) + "\n\n"
+        "[matriz]\n"
+        "espesor_base_mm = 3.0\n"
+        "margen_silicona_mm = 10.0\n"
+        "espesor_pared_mm = 3.0\n"
+        "margen_superior_mm = 10.0\n"
+        "separacion_cavidades_mm = 10.0\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CASTKIT_FABRICACION_TOML", str(toml_custom))
 
 
 def _crear_diseno_con_brief(
@@ -299,3 +353,275 @@ def test_generar_protege_reemplazo_interactivo_y_con_flag(
         assert rc == 0
     finally:
         desregistrar_proveedor("fake-ia")
+
+
+def test_tripo3d_v3_usa_rutas_cabeceras_y_cuerpo_sin_textura(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Imagen -> 3D en la API v3: rutas, cabecera Bearer, campo "file" y texture/pbr en false."""
+    _escribir_toml_tripo(tmp_path, monkeypatch, tripo_modelo="v3-custom")
+
+    carpeta = _crear_diseno_con_brief(
+        tmp_path,
+        monkeypatch,
+        {"referencia.png": b"\x89PNG\r\n\x1a\n"},
+    )
+    monkeypatch.setenv("TRIPO_API_KEY", "tsk_test")
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+
+    caja = trimesh.creation.box(extents=[10, 40, 10])
+    glb_bytes = caja.export(file_type="glb")
+
+    peticiones: list[dict] = []
+
+    def _fake_urlopen(req: urllib.request.Request, timeout: float = 60) -> _FakeHTTPResp:
+        url = req.full_url
+        peticiones.append(
+            {
+                "metodo": req.get_method(),
+                "url": url,
+                "auth": req.get_header("Authorization"),
+                "content_type": req.get_header("Content-type"),
+                "body": req.data,
+            }
+        )
+        if url == "https://openapi.tripo3d.ai/v3/files":
+            return _FakeHTTPResp(
+                json.dumps({"code": 0, "data": {"file_token": "tok-123"}}).encode()
+            )
+        if url == "https://openapi.tripo3d.ai/v3/generation/image-to-model":
+            return _FakeHTTPResp(json.dumps({"code": 0, "data": {"task_id": "task-abc"}}).encode())
+        if url == "https://openapi.tripo3d.ai/v3/tasks/task-abc":
+            return _FakeHTTPResp(
+                json.dumps(
+                    {
+                        "code": 0,
+                        "data": {
+                            "status": "success",
+                            "output": {"model_url": "https://cdn.tripo3d.ai/model.glb"},
+                        },
+                    }
+                ).encode()
+            )
+        if url == "https://cdn.tripo3d.ai/model.glb":
+            return _FakeHTTPResp(glb_bytes)
+        raise AssertionError(f"URL inesperada en el proveedor tripo3d: {url}")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+
+    rc = main(["generar", "guagua-pan", "--proveedor", "tripo3d"])
+    assert rc == 0
+
+    urls = [p["url"] for p in peticiones]
+    assert all("api.tripo3d.ai/v2" not in u for u in urls)
+    assert "https://openapi.tripo3d.ai/v3/files" in urls
+    assert "https://openapi.tripo3d.ai/v3/generation/image-to-model" in urls
+    assert "https://openapi.tripo3d.ai/v3/tasks/task-abc" in urls
+
+    for p in peticiones:
+        if "openapi.tripo3d.ai" in p["url"]:
+            assert p["auth"] == "Bearer tsk_test"
+
+    cuerpo_subida = next(
+        p["body"] for p in peticiones if p["url"] == "https://openapi.tripo3d.ai/v3/files"
+    )
+    assert b'name="file"' in cuerpo_subida
+
+    cuerpo_tarea = next(
+        p["body"]
+        for p in peticiones
+        if p["url"] == "https://openapi.tripo3d.ai/v3/generation/image-to-model"
+    )
+    payload = json.loads(cuerpo_tarea.decode("utf-8"))
+    assert payload == {
+        "input": "tok-123",
+        "model": "v3-custom",
+        "texture": False,
+        "pbr": False,
+    }
+
+    # El GLB de prueba (altura 40 en Y, convención glTF) debe quedar con la
+    # altura en Z tras la conversión.
+    destino = carpeta / "input" / "guagua-pan_v1_bruto.stl"
+    assert destino.is_file()
+    malla_resultante = trimesh.load(destino)
+    assert malla_resultante.extents[2] == pytest.approx(40.0, abs=0.5)
+
+    datos = cargar_diseno(carpeta)
+    reg = datos["versiones"]["v1"]["parametros"]["generacion"]
+    assert reg["tripo_modelo"] == "v3-custom"
+    assert reg["tripo_task_id"] == "task-abc"
+
+
+def test_tripo3d_v3_texto_a_modelo_usa_modelo_por_defecto(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sin `tripo_modelo` en la config, usa el valor por defecto `v2.5-20250123`."""
+    carpeta = _crear_diseno_con_brief(
+        tmp_path,
+        monkeypatch,
+        {"idea.txt": "Vela con forma de guagua de pan"},
+    )
+    monkeypatch.setenv("TRIPO_API_KEY", "tsk_test")
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+
+    caja = trimesh.creation.box(extents=[10, 40, 10])
+    glb_bytes = caja.export(file_type="glb")
+
+    peticiones: list[dict] = []
+
+    def _fake_urlopen(req: urllib.request.Request, timeout: float = 60) -> _FakeHTTPResp:
+        url = req.full_url
+        peticiones.append({"url": url, "body": req.data})
+        if url == "https://openapi.tripo3d.ai/v3/generation/text-to-model":
+            return _FakeHTTPResp(json.dumps({"code": 0, "data": {"task_id": "task-txt"}}).encode())
+        if url == "https://openapi.tripo3d.ai/v3/tasks/task-txt":
+            return _FakeHTTPResp(
+                json.dumps(
+                    {
+                        "code": 0,
+                        "data": {
+                            "status": "success",
+                            "output": {"model_url": "https://cdn.tripo3d.ai/m.glb"},
+                        },
+                    }
+                ).encode()
+            )
+        if url == "https://cdn.tripo3d.ai/m.glb":
+            return _FakeHTTPResp(glb_bytes)
+        raise AssertionError(f"URL inesperada en el proveedor tripo3d: {url}")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+
+    rc = main(["generar", "guagua-pan", "--proveedor", "tripo3d"])
+    assert rc == 0
+
+    cuerpo_tarea = next(
+        p["body"]
+        for p in peticiones
+        if p["url"] == "https://openapi.tripo3d.ai/v3/generation/text-to-model"
+    )
+    payload = json.loads(cuerpo_tarea.decode("utf-8"))
+    assert payload["prompt"]
+    assert payload["model"] == "v2.5-20250123"
+    assert payload["texture"] is False
+    assert payload["pbr"] is False
+
+    datos = cargar_diseno(carpeta)
+    reg = datos["versiones"]["v1"]["parametros"]["generacion"]
+    assert reg["tripo_modelo"] == "v2.5-20250123"
+    assert reg["tripo_task_id"] == "task-txt"
+
+
+def test_tripo3d_v3_plazo_configurable_agota_tiempo_sin_escribir_malla(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Con el estado siempre "running" y un plazo pequeño, falla sin escribir malla."""
+    _escribir_toml_tripo(tmp_path, monkeypatch, tripo_espera_max_s=5)
+
+    carpeta = _crear_diseno_con_brief(
+        tmp_path,
+        monkeypatch,
+        {"idea.txt": "Vela con forma de guagua de pan"},
+    )
+    monkeypatch.setenv("TRIPO_API_KEY", "tsk_test")
+
+    contador = {"valor": 0.0}
+
+    def _fake_monotonic() -> float:
+        contador["valor"] += 100.0
+        return contador["valor"]
+
+    monkeypatch.setattr(time, "monotonic", _fake_monotonic)
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+
+    def _fake_urlopen(req: urllib.request.Request, timeout: float = 60) -> _FakeHTTPResp:
+        url = req.full_url
+        if url == "https://openapi.tripo3d.ai/v3/generation/text-to-model":
+            return _FakeHTTPResp(
+                json.dumps({"code": 0, "data": {"task_id": "task-lento"}}).encode()
+            )
+        if url == "https://openapi.tripo3d.ai/v3/tasks/task-lento":
+            return _FakeHTTPResp(json.dumps({"code": 0, "data": {"status": "running"}}).encode())
+        raise AssertionError(f"URL inesperada en el proveedor tripo3d: {url}")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+
+    rc = main(["generar", "guagua-pan", "--proveedor", "tripo3d"])
+    assert rc != 0
+    err = capsys.readouterr().err
+    assert "task-lento" in err
+    assert "5 s" in err
+
+    assert not (carpeta / "input" / "guagua-pan_v1_bruto.stl").exists()
+    assert "generacion" not in cargar_diseno(carpeta)["versiones"]["v1"]["parametros"]
+
+
+def test_tripo3d_v3_estado_failed_no_escribe_malla(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Un estado `failed` en el sondeo termina en error, sin dejar malla escrita."""
+    carpeta = _crear_diseno_con_brief(
+        tmp_path,
+        monkeypatch,
+        {"idea.txt": "Vela con forma de guagua de pan"},
+    )
+    monkeypatch.setenv("TRIPO_API_KEY", "tsk_test")
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+
+    def _fake_urlopen(req: urllib.request.Request, timeout: float = 60) -> _FakeHTTPResp:
+        url = req.full_url
+        if url == "https://openapi.tripo3d.ai/v3/generation/text-to-model":
+            return _FakeHTTPResp(
+                json.dumps({"code": 0, "data": {"task_id": "task-fallida"}}).encode()
+            )
+        if url == "https://openapi.tripo3d.ai/v3/tasks/task-fallida":
+            return _FakeHTTPResp(json.dumps({"code": 0, "data": {"status": "failed"}}).encode())
+        raise AssertionError(f"URL inesperada en el proveedor tripo3d: {url}")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+
+    rc = main(["generar", "guagua-pan", "--proveedor", "tripo3d"])
+    assert rc != 0
+    err = capsys.readouterr().err
+    assert "task-fallida" in err
+    assert "failed" in err
+
+    assert not (carpeta / "input" / "guagua-pan_v1_bruto.stl").exists()
+    assert "generacion" not in cargar_diseno(carpeta)["versiones"]["v1"]["parametros"]
+
+
+def test_tripo3d_v3_http_error_durante_sondeo_no_escribe_malla(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Un `HTTPError` durante el sondeo termina en error con el `task_id`, sin malla escrita."""
+    carpeta = _crear_diseno_con_brief(
+        tmp_path,
+        monkeypatch,
+        {"idea.txt": "Vela con forma de guagua de pan"},
+    )
+    monkeypatch.setenv("TRIPO_API_KEY", "tsk_test")
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+
+    def _fake_urlopen(req: urllib.request.Request, timeout: float = 60) -> _FakeHTTPResp:
+        url = req.full_url
+        if url == "https://openapi.tripo3d.ai/v3/generation/text-to-model":
+            return _FakeHTTPResp(
+                json.dumps({"code": 0, "data": {"task_id": "task-caido"}}).encode()
+            )
+        if url == "https://openapi.tripo3d.ai/v3/tasks/task-caido":
+            raise urllib.error.HTTPError(
+                url, 500, "Internal Server Error", {}, io.BytesIO(b"servidor caido")
+            )
+        raise AssertionError(f"URL inesperada en el proveedor tripo3d: {url}")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+
+    rc = main(["generar", "guagua-pan", "--proveedor", "tripo3d"])
+    assert rc != 0
+    err = capsys.readouterr().err
+    assert "task-caido" in err
+    assert "500" in err
+
+    assert not (carpeta / "input" / "guagua-pan_v1_bruto.stl").exists()
+    assert "generacion" not in cargar_diseno(carpeta)["versiones"]["v1"]["parametros"]

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 import mimetypes
 import os
 import shlex
@@ -93,7 +94,10 @@ class ProveedorGeneracion3D(Protocol):
 
 
 def _descargar_y_convertir_a_stl(url_modelo: str, destino_stl: Path) -> None:
-    """Descarga un modelo 3D (`.glb`, `.obj`, `.stl`) desde ``url_modelo`` y lo exporta como STL."""
+    """Descarga un modelo 3D (`.glb`, `.gltf`, `.obj`, `.stl`) desde ``url_modelo``.
+
+    Lo exporta como STL.
+    """
     sufijo = Path(url_modelo.split("?")[0]).suffix.lower() or ".glb"
     descriptor, tmp_str = tempfile.mkstemp(prefix=".modelo-remoto-", suffix=sufijo)
     os.close(descriptor)
@@ -103,6 +107,15 @@ def _descargar_y_convertir_a_stl(url_modelo: str, destino_stl: Path) -> None:
         with urllib.request.urlopen(req, timeout=180) as resp:
             tmp_path.write_bytes(resp.read())
         escena_o_malla = trimesh.load(tmp_path, force="mesh")
+        if sufijo in (".glb", ".gltf"):
+            # `trimesh.load` no reconvierte la convención Y-arriba de glTF/GLB:
+            # se comprobó cargando una caja de 10x40x10 (altura en Y) y la
+            # altura seguía en Y tras cargarla. Se gira +90° alrededor de X
+            # para que el +Y original pase a +Z, como espera el resto del
+            # pipeline de castkit (Z-arriba).
+            escena_o_malla.apply_transform(
+                trimesh.transformations.rotation_matrix(math.pi / 2, [1, 0, 0])
+            )
         escena_o_malla.export(destino_stl, file_type="stl")
     except Exception as exc:
         raise GeneracionError(
@@ -172,11 +185,70 @@ class ProveedorFal:
         _descargar_y_convertir_a_stl(str(url_modelo), destino_stl)
 
 
-class ProveedorTripo3D:
-    """Proveedor enchufable para Tripo3D API v2 (soporta Imagen → 3D y Texto → 3D).
+_TRIPO_V3_BASE = "https://openapi.tripo3d.ai"
+_TRIPO_ESTADOS_FALLO = ("failed", "cancelled", "banned", "expired")
+_TRIPO_INTERVALO_SONDEO_S = 3.0
 
-    Lee la clave de la variable de entorno ``TRIPO_API_KEY``.
+
+class ProveedorTripo3D:
+    """Proveedor enchufable para Tripo3D API v3 (soporta Imagen → 3D y Texto → 3D).
+
+    Lee la clave de la variable de entorno ``TRIPO_API_KEY``. La API v2 se
+    apaga el 2026-10-31; este proveedor usa la base ``https://openapi.tripo3d.ai``.
+    Tras crear la tarea, expone ``self.parametros_registro`` con
+    ``tripo_modelo`` y ``tripo_task_id`` para que queden registrados en la
+    etapa ``"generacion"`` del diseño.
     """
+
+    def __init__(self, modelo: str = "v2.5-20250123", espera_max_s: float = 600.0) -> None:
+        self.modelo = modelo
+        self.espera_max_s = float(espera_max_s)
+        self.parametros_registro: dict[str, Any] = {}
+
+    def _peticion(
+        self,
+        metodo: str,
+        ruta: str,
+        api_key: str,
+        *,
+        data: bytes | None = None,
+        content_type: str | None = None,
+        timeout: float = 60.0,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Llama a la API v3 de tripo3d y desenvuelve `{"code": 0, "data": {...}}`.
+
+        Si ``task_id`` se indica, se incluye en cualquier mensaje de error
+        (la tarea ya existe en tripo3d aunque la petición haya fallado).
+        """
+        sufijo_tarea = f' (tarea "{task_id}" de "tripo3d")' if task_id else ""
+        headers = {"Authorization": f"Bearer {api_key}"}
+        if content_type:
+            headers["Content-Type"] = content_type
+        req = urllib.request.Request(
+            f"{_TRIPO_V3_BASE}{ruta}", data=data, headers=headers, method=metodo
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                cuerpo = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            detalle = exc.read().decode("utf-8", errors="replace")
+            raise GeneracionError(
+                f'Error HTTP {exc.code} de "tripo3d" en {ruta}{sufijo_tarea}: {detalle}'
+            ) from exc
+        except Exception as exc:
+            raise GeneracionError(
+                f'No se pudo conectar con "tripo3d" en {ruta}{sufijo_tarea}: {exc}'
+            ) from exc
+
+        codigo = cuerpo.get("code")
+        if codigo != 0:
+            mensaje = cuerpo.get("message") or cuerpo
+            raise GeneracionError(
+                f'La API de "tripo3d" devolvió un error en {ruta}{sufijo_tarea} '
+                f"(code={codigo}): {mensaje}"
+            )
+        return cuerpo.get("data") or {}
 
     def generar(self, insumos: InsumosBrief, destino_stl: Path) -> None:
         api_key = os.environ.get("TRIPO_API_KEY", "").strip()
@@ -186,10 +258,7 @@ class ProveedorTripo3D:
                 '(por ejemplo: export TRIPO_API_KEY="tsk_...").'
             )
 
-        headers_json = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
+        self.parametros_registro = {}
 
         if insumos.imagenes:
             img = insumos.imagenes[0]
@@ -204,69 +273,82 @@ class ProveedorTripo3D:
                 + img.read_bytes()
                 + f"\r\n--{boundary}--\r\n".encode()
             )
-
-            req_up = urllib.request.Request(
-                "https://api.tripo3d.ai/v2/openapi/upload",
+            datos_subida = self._peticion(
+                "POST",
+                "/v3/files",
+                api_key,
                 data=cuerpo_multipart,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": f"multipart/form-data; boundary={boundary}",
-                },
-                method="POST",
+                content_type=f"multipart/form-data; boundary={boundary}",
+                timeout=120.0,
             )
-            try:
-                with urllib.request.urlopen(req_up, timeout=120) as resp:
-                    up_data = json.loads(resp.read().decode("utf-8"))
-                image_token = up_data["data"]["image_token"]
-            except Exception as exc:
-                raise GeneracionError(f'No se pudo subir la imagen a "tripo3d": {exc}') from exc
-
-            ext_img = img.suffix.lstrip(".").lower() or "png"
-            task_payload: dict[str, Any] = {
-                "type": "image_to_model",
-                "file": {"type": ext_img, "file_token": image_token},
+            file_token = datos_subida.get("file_token")
+            if not file_token:
+                raise GeneracionError(
+                    f'La subida a "tripo3d" no devolvió file_token: {datos_subida}'
+                )
+            payload_tarea: dict[str, Any] = {
+                "input": file_token,
+                "model": self.modelo,
+                "texture": False,
+                "pbr": False,
             }
+            ruta_tarea = "/v3/generation/image-to-model"
         else:
-            task_payload = {
-                "type": "text_to_model",
+            payload_tarea = {
                 "prompt": insumos.prompt,
+                "model": self.modelo,
+                "texture": False,
+                "pbr": False,
             }
+            ruta_tarea = "/v3/generation/text-to-model"
 
-        req_task = urllib.request.Request(
-            "https://api.tripo3d.ai/v2/openapi/task",
-            data=json.dumps(task_payload).encode("utf-8"),
-            headers=headers_json,
-            method="POST",
+        datos_tarea = self._peticion(
+            "POST",
+            ruta_tarea,
+            api_key,
+            data=json.dumps(payload_tarea).encode("utf-8"),
+            content_type="application/json",
+            timeout=60.0,
         )
-        try:
-            with urllib.request.urlopen(req_task, timeout=60) as resp:
-                task_data = json.loads(resp.read().decode("utf-8"))
-            task_id = task_data["data"]["task_id"]
-        except Exception as exc:
-            raise GeneracionError(f'No se pudo crear la tarea en "tripo3d": {exc}') from exc
-
-        for _ in range(90):
-            req_poll = urllib.request.Request(
-                f"https://api.tripo3d.ai/v2/openapi/task/{task_id}",
-                headers={"Authorization": f"Bearer {api_key}"},
+        task_id = datos_tarea.get("task_id")
+        if not task_id:
+            raise GeneracionError(
+                f'La creación de la tarea en "tripo3d" no devolvió task_id: {datos_tarea}'
             )
-            with urllib.request.urlopen(req_poll, timeout=60) as resp:
-                estado_data = json.loads(resp.read().decode("utf-8"))["data"]
+
+        self.parametros_registro = {"tripo_modelo": self.modelo, "tripo_task_id": task_id}
+
+        inicio = time.monotonic()
+        while True:
+            estado_data = self._peticion(
+                "GET", f"/v3/tasks/{task_id}", api_key, timeout=60.0, task_id=task_id
+            )
             status = estado_data.get("status")
             if status == "success":
                 salida = estado_data.get("output") or {}
-                url_modelo = salida.get("model") or salida.get("pbr_model")
+                url_modelo = (
+                    salida.get("model_url")
+                    or salida.get("model")
+                    or salida.get("pbr_model_url")
+                    or salida.get("pbr_model")
+                )
                 if not url_modelo:
                     raise GeneracionError(
-                        f'La tarea de "tripo3d" terminó sin URL de modelo: {estado_data}'
+                        f'La tarea "{task_id}" de "tripo3d" terminó sin URL de modelo: '
+                        f"{estado_data}"
                     )
                 _descargar_y_convertir_a_stl(str(url_modelo), destino_stl)
                 return
-            if status in ("failed", "cancelled", "banned", "expired"):
-                raise GeneracionError(f'La tarea de "tripo3d" falló con estado "{status}".')
-            time.sleep(2.0)
-
-        raise GeneracionError('Tiempo de espera agotado esperando al proveedor "tripo3d".')
+            if status in _TRIPO_ESTADOS_FALLO:
+                raise GeneracionError(
+                    f'La tarea "{task_id}" de "tripo3d" falló con estado "{status}".'
+                )
+            if time.monotonic() - inicio >= self.espera_max_s:
+                raise GeneracionError(
+                    f"Tiempo de espera agotado ({self.espera_max_s:.0f} s) esperando a la "
+                    f'tarea "{task_id}" de "tripo3d".'
+                )
+            time.sleep(_TRIPO_INTERVALO_SONDEO_S)
 
 
 class ProveedorImagen3D:
@@ -529,7 +611,11 @@ def obtener_proveedor(
     if nombre == "fal":
         return ProveedorFal()
     if nombre == "tripo3d":
-        return ProveedorTripo3D()
+        cfg = config_generacion or {}
+        return ProveedorTripo3D(
+            modelo=str(cfg.get("tripo_modelo", "v2.5-20250123")),
+            espera_max_s=float(cfg.get("tripo_espera_max_s", 600.0)),
+        )
 
     disponibles = sorted(
         {"comando", "imagen-3d", "fal", "tripo3d", *_PROVEEDORES_REGISTRADOS.keys()}
@@ -636,6 +722,8 @@ def generar_malla(
     config_gen = cargar_config_generacion()
     insumos = recolectar_insumos_brief(carpeta / "brief", prompt_extra=prompt)
 
+    registro_proveedor: dict[str, Any] = {}
+
     # Vía directa si el brief ya incluye un STL opcional y no se forzó proveedor.
     if insumos.mallas_stl and proveedor is None:
         stl_brief = insumos.mallas_stl[0]
@@ -671,6 +759,7 @@ def generar_malla(
             tmp_gen_path.unlink(missing_ok=True)
 
         archivos_usados = insumos.nombres_archivos_usados()
+        registro_proveedor = getattr(instancia_proveedor, "parametros_registro", None) or {}
 
     parametros: dict[str, Any] = {
         "proveedor": nombre_proveedor,
@@ -679,6 +768,7 @@ def generar_malla(
         "sha256": metricas["sha256"],
         "caras": metricas["caras"],
         "vertices": metricas["vertices"],
+        **registro_proveedor,
     }
     try:
         registrar_parametros(carpeta, "generacion", parametros)

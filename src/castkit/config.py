@@ -92,8 +92,16 @@ def cargar_config_limpieza() -> dict[str, Any]:
 
 
 def cargar_config_generacion() -> dict[str, Any]:
-    """Carga la sección `[generacion]` de `config/fabricacion.toml`."""
-    return _cargar_seccion("generacion", _CLAVES_GENERACION)
+    """Carga la sección `[generacion]` de `config/fabricacion.toml`.
+
+    Devuelve un `dict` con las claves `proveedor`, `comando`, `tripo_modelo`
+    y `tripo_espera_max_s`.
+    """
+    return _cargar_seccion(
+        "generacion",
+        _CLAVES_GENERACION,
+        opcionales={"tripo_modelo": "v2.5-20250123", "tripo_espera_max_s": 600},
+    )
 
 
 def cargar_config_mecha() -> dict[str, Any]:
