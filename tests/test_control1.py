@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from datetime import date
 from pathlib import Path
@@ -333,3 +334,30 @@ def test_control1_con_blender_headless_genera_los_cuatro_renders(
         with Image.open(ruta) as img:
             assert img.format == "PNG"
             assert "Alto: 60.0 mm" in img.info.get("castkit_medidas", "")
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        subprocess.TimeoutExpired(cmd="blender", timeout=300),
+        PermissionError("blender no es ejecutable"),
+    ],
+    ids=["timeout", "no-ejecutable"],
+)
+def test_control1_blender_colgado_o_no_ejecutable_recurre_a_matplotlib(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    import castkit.control1 as mod_c1
+
+    carpeta = _preparar_diseno_limpio(tmp_path, monkeypatch, alto_mm=60.0)
+    monkeypatch.setattr(mod_c1, "find_blender", lambda: Path("/usr/bin/blender"))
+
+    def _fake_run_blender(script: Path, *args: str) -> None:
+        raise error
+
+    monkeypatch.setattr(mod_c1, "run_blender_script", _fake_run_blender)
+
+    resultado = ejecutar_control1(carpeta, sin_blender=False)
+    assert resultado["metodo"] == "matplotlib"
+    for ruta in resultado["renders"]:
+        assert ruta.is_file()

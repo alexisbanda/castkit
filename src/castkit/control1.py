@@ -18,6 +18,7 @@ y bloquea el paso a `castkit matriz` mientras la versión no esté aprobada.
 
 from __future__ import annotations
 
+import subprocess
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -341,7 +342,8 @@ def ejecutar_control1(
             if faltantes:
                 raise RuntimeError(f"Blender no generó los renders: {', '.join(faltantes)}")
             metodo = "blender"
-        except (BlenderNotFoundError, RuntimeError):
+        except (BlenderNotFoundError, RuntimeError, OSError, subprocess.TimeoutExpired):
+            # Blender ausente, no ejecutable, colgado o sin renders: recurrimos a matplotlib.
             _renderizar_con_matplotlib(malla, rutas_vistas)
             metodo = "matplotlib"
     else:
