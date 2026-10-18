@@ -5,7 +5,15 @@ Castkit — Agent-assisted pipeline that turns 3D models into production-ready m
 ## Requisitos
 
 - [uv](https://docs.astral.sh/uv/) para gestionar el entorno y las dependencias (uv descarga automáticamente Python 3.12 si no lo tienes).
-- Blender LTS en modo headless. La versión exacta requerida está fijada en [`.blender-version`](.blender-version) (por ejemplo, `5.2.2`). Los tests y scripts que lo necesitan lo invocan como subproceso.
+- Blender LTS en modo headless, **obligatorio** para los puntos de control (`castkit control1`) y usado también como respaldo de remallado en `castkit limpieza`. La versión exacta requerida está fijada en [`.blender-version`](.blender-version) (por ejemplo, `5.2.2`). Los tests y scripts que lo necesitan lo invocan como subproceso.
+
+## Qué hace cada tecnología
+
+- **trimesh**: carga, revisa y repara mallas (normales, cierre, medidas).
+- **manifold3d**: construye los sólidos de fabricación (la resta booleana del canal de mecha, la matriz en modo figura o cubeta multicavidad).
+- **Blender** (proceso externo, headless): renderiza las 4 vistas del punto de control 1 (motor `CYCLES` en CPU) y, como respaldo, remalla por vóxeles cuando `castkit limpieza` no logra cerrar la malla en Python.
+- **Pillow**: sobreimprime la vista y las medidas en mm sobre cada PNG del punto de control 1.
+- **numpy** y **scipy**: apoyan al proveedor local `imagen-3d` (segmentación, transformada de distancia y suavizado para reconstruir un volumen 3D desde una imagen 2D).
 
 ## Instalación
 
@@ -320,7 +328,7 @@ uv run castkit generar guagua-pan --prompt "guagua de pan tradicional sin socava
   utilizados, el prompt, `sha256`, `caras` y `vertices` en `versiones.v<actual>.parametros.generacion`.
 
 Los `.pdf` y `.ai` del brief solo los recibe el proveedor `comando` (vía la variable de entorno
-`CASTKIT_INSUMOS`, ver abajo): los demás proveedores integrados (`imagen-3d`, `tripo3d`, `fal`)
+`CASTKIT_INSUMOS`, ver abajo): los demás proveedores integrados (`imagen-3d`, `tripo3d`)
 ignoran documentos y mallas `.stl` del brief, y solo usan la primera imagen de `brief/` junto con
 el texto/prompt.
 
@@ -331,7 +339,6 @@ el texto/prompt.
 | `comando` | todos los insumos (imágenes, `.pdf`/`.ai`, prompt); se los pasa a un comando externo | `comando` en `[generacion]`; si está vacío y hay imágenes, recurre a `imagen-3d` |
 | `imagen-3d` | solo la primera imagen (reconstructor volumétrico local, sin red) | nada (no necesita claves de API) |
 | `tripo3d` | la primera imagen (Imagen→3D) o, si no hay imágenes, el prompt (Texto→3D), vía la API v3 de Tripo | variable de entorno `TRIPO_API_KEY` |
-| `fal` | la primera imagen y, si hay, el prompt, vía Fal.ai (`fal-ai/trellis` por defecto) | variable de entorno `FAL_KEY` |
 
 El proveedor `tripo3d` pide solo geometría (sin texturas ni PBR), registra `tripo_modelo` y
 `tripo_task_id` en `versiones.v<actual>.parametros.generacion`, y gira el GLB descargado de
@@ -347,7 +354,7 @@ combinado del brief más `--prompt`).
 | Opción | Obligatoria | Valores aceptados |
 | --- | --- | --- |
 | `nombre` (posicional) | sí | nombre de un diseño ya dado de alta |
-| `--proveedor` | no | `comando`, `imagen-3d`, `tripo3d`, `fal`, o un proveedor registrado en tiempo de ejecución (si se omite, se usa `config/fabricacion.toml`) |
+| `--proveedor` | no | `comando`, `imagen-3d`, `tripo3d`, o un proveedor registrado en tiempo de ejecución (si se omite, se usa `config/fabricacion.toml`) |
 | `--prompt` | no | texto o prompt de contexto adicional para el generador 3D |
 | `--reemplazar` | no | reemplaza sin preguntar la malla ya guardada en la versión actual, si existe |
 
@@ -388,6 +395,8 @@ Los cuatro archivos se guardan en `output/` nombrados con la versión actual:
 
 La decisión (`aprobado`, `rechazado` con motivo obligatorio, o `pendiente`) y la fecha quedan registradas en `versiones.v1.parametros.control_1` dentro de `diseno.json`. Mientras el punto de control 1 no se haya ejecutado, o esté pendiente o rechazado, `castkit matriz` rechaza generar la matriz e informa del motivo. `castkit flujo` también se detiene en este punto: en una terminal interactiva pregunta si apruebas la figura, y en scripts o CI solo avanza a la matriz si se le pasa `--aprobar-control1`.
 
+Los renders se generan **siempre con Blender** en modo headless (motor `CYCLES` en CPU): no hay ningún motor de respaldo. Si Blender no está instalado o no se encuentra, `castkit control1` falla con un mensaje que explica cómo instalar Blender LTS (la versión fijada en `.blender-version`) o cómo configurar `BLENDER_BIN`; si Blender falla o se cuelga, el error incluye el detalle (y, si se agotó el tiempo de espera, los segundos). En ningún caso deja PNG a medio generar.
+
 ### Opciones de `castkit control1`
 
 | Opción | Obligatoria | Valores aceptados |
@@ -396,7 +405,6 @@ La decisión (`aprobado`, `rechazado` con motivo obligatorio, o `pendiente`) y l
 | `--aprobar` | no | aprueba el punto de control 1 y habilita el paso a `castkit matriz` |
 | `--rechazar` | no | rechaza el punto de control 1 y deja el diseño sin avanzar |
 | `--motivo` | sí (si se usa `--rechazar`) | texto libre explicando qué corregir |
-| `--sin-blender` | no | genera las 4 vistas PNG con el renderizador de Python sin invocar a Blender |
 
 ## Generar la matriz imprimible (`.stl`) en modo `figura` o `cubeta`
 
