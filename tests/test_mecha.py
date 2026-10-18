@@ -288,7 +288,7 @@ def test_flujo_completo_genera_matriz_y_ficha_tecnica_en_espanol(
 
     _dar_alta("vela-flujo", brief, material="cera", alto_mm=20.0, cavidades=2)
 
-    rc = main(["flujo", "vela-flujo", "--modo", "cubeta"])
+    rc = main(["flujo", "vela-flujo", "--modo", "cubeta", "--aprobar-control1"])
     assert rc == 0
 
     carpeta = disenos_dir / "vela-flujo"
@@ -308,3 +308,28 @@ def test_flujo_completo_genera_matriz_y_ficha_tecnica_en_espanol(
     assert "limpieza" in parametros
     assert parametros["mecha"]["aplicado"] is True
     assert parametros["matriz"]["modo"] == "cubeta"
+
+
+def test_flujo_sin_terminal_se_detiene_en_control1_sin_aprobar(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    disenos_dir = tmp_path / "disenos"
+    disenos_dir.mkdir()
+    monkeypatch.chdir(disenos_dir)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    brief = tmp_path / "brief_src"
+    brief.mkdir()
+    (brief / "modelo.stl").write_bytes(CUBE_STL.read_bytes())
+
+    _dar_alta("vela-gate", brief, material="cera", alto_mm=20.0, cavidades=2)
+
+    rc = main(["flujo", "vela-gate", "--modo", "cubeta"])
+    assert rc == 1
+    assert "punto de control 1" in capsys.readouterr().err
+
+    carpeta = disenos_dir / "vela-gate"
+    reg = cargar_diseno(carpeta)["versiones"]["v1"]["parametros"]["control_1"]
+    assert reg["estado"] == "pendiente"
+    assert not (carpeta / "output" / "vela-gate_v1_matriz.stl").exists()
