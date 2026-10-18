@@ -37,8 +37,13 @@ def _centrar_malla_en_origen(obj: bpy.types.Object) -> tuple[float, float, float
 
 
 def _aplicar_material_gris(obj: bpy.types.Object) -> None:
+    color = (0.78, 0.80, 0.84, 1.0)
     mat = bpy.data.materials.new(name="CastkitControl1Mat")
-    mat.diffuse_color = (0.78, 0.80, 0.84, 1.0)
+    mat.diffuse_color = color
+    # En Blender 5.x los materiales siempre usan nodos: el color va en el BSDF.
+    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    if bsdf is not None:
+        bsdf.inputs["Base Color"].default_value = color
     if obj.data.materials:
         obj.data.materials[0] = mat
     else:
@@ -46,13 +51,12 @@ def _aplicar_material_gris(obj: bpy.types.Object) -> None:
 
 
 def _configurar_motor_render(scene: bpy.types.Scene) -> None:
-    motores_disponibles = {
-        item.identifier for item in scene.render.bl_rna.properties["engine"].enum_items
-    }
-    for candidato in ("BLENDER_WORKBENCH", "BLENDER_EEVEE_NEXT", "BLENDER_EEVEE", "CYCLES"):
-        if candidato in motores_disponibles:
-            scene.render.engine = candidato
-            break
+    # Cycles en CPU no necesita GPU, así que también renderiza en runners de CI
+    # headless; EEVEE y Workbench hacen caer a Blender sin GPU.
+    scene.render.engine = "CYCLES"
+    scene.cycles.device = "CPU"
+    scene.cycles.samples = 16
+    scene.cycles.use_denoising = True
 
     scene.render.resolution_x = 600
     scene.render.resolution_y = 600
@@ -64,7 +68,13 @@ def _configurar_motor_render(scene: bpy.types.Scene) -> None:
     if scene.world is None:
         mundo = bpy.data.worlds.new("CastkitWorld")
         scene.world = mundo
-    scene.world.color = (0.16, 0.18, 0.22)
+    color_fondo = (0.16, 0.18, 0.22)
+    scene.world.color = color_fondo
+    fondo = scene.world.node_tree.nodes.get("Background")
+    if fondo is not None:
+        fondo.inputs["Color"].default_value = (*color_fondo, 1.0)
+        # Poca luz ambiental para que las caras se distingan por las luces solares.
+        fondo.inputs["Strength"].default_value = 0.35
 
 
 def _crear_luces() -> None:
