@@ -24,7 +24,9 @@ Pasos del pipeline (ver detalles en cada función):
    volumen positivo.
 8. Medir la distancia máxima contra la malla original orientada, escalada y
    recortada (sin simplificar), excluyendo de la medición las zonas que
-   rellenó el paso 4; si supera `tolerancia_mm`, se rechaza el resultado.
+   rellenó el paso 4; si supera `tolerancia_mm`, se rechaza el resultado. Si
+   la malla se cerró con el respaldo de Blender, además se mide contra la
+   original escalada (antes del remallado), y se registra la peor distancia.
 9. Escribir la malla limpia en `work/` y registrar los parámetros usados.
 
 Sigue la REGLA de :mod:`castkit.versiones`: la salida se nombra con
@@ -271,6 +273,8 @@ def _distancia_maxima(
     limpia: trimesh.Trimesh,
     exclusiones: list[dict[str, Any]],
     n_muestras: int = _N_MUESTRAS_DISTANCIA,
+    *,
+    excluir_en_referencia: bool = True,
 ) -> float:
     """Distancia máxima entre las superficies de ``referencia`` y ``limpia``.
 
@@ -284,13 +288,17 @@ def _distancia_maxima(
     Las zonas de ``exclusiones`` (los huecos que se cerraron) se excluyen de
     los puntos muestreados en ``limpia``, para no penalizar el parche que los
     rellenó; como ``referencia`` conserva esos mismos parches (ver
-    :func:`limpiar_malla`), también se excluyen allí por igual.
+    :func:`limpiar_malla`), también se excluyen allí por igual. Con
+    ``excluir_en_referencia=False`` (referencia sin parches, como la malla
+    original abierta) toda la superficie de ``referencia`` se mide: es
+    superficie real y tiene que seguir presente en ``limpia``.
     """
     if len(referencia.faces) == 0 or len(limpia.faces) == 0:
         return 0.0
 
     puntos_ref, _ = trimesh.sample.sample_surface(referencia, n_muestras, seed=0)
-    puntos_ref = _filtrar_exclusiones(puntos_ref, exclusiones)
+    if excluir_en_referencia:
+        puntos_ref = _filtrar_exclusiones(puntos_ref, exclusiones)
     if len(puntos_ref) == 0:
         distancia_ref = np.array([0.0])
     else:
@@ -382,6 +390,7 @@ def limpiar_malla(
 
     metodo = "python"
     huecos_cerrados: list[dict[str, Any]] = []
+    distancia_remallado_mm = 0.0
     error_python: LimpiezaError | None = None
 
     try:
@@ -413,6 +422,31 @@ def limpiar_malla(
         if not malla.is_watertight:
             raise LimpiezaError(
                 "La malla tampoco quedó cerrada tras el remallado de respaldo con Blender."
+            )
+        if malla.volume <= 0:
+            raise LimpiezaError(
+                "El remallado de respaldo con Blender produjo una malla sin volumen; no se "
+                "escribió ningún archivo. Siguientes pasos: corrige el modelo y vuelve a hacer "
+                '"castkit ingesta" con una malla nueva.'
+            )
+        # La referencia de la medición final (paso 8) sale de la malla ya
+        # remallada, así que aquí se mide la fidelidad contra la original:
+        # sin esto, cualquier deformación de Blender pasaría con distancia 0.
+        # Solo se excluyen los parches de los huecos en la malla remallada:
+        # toda la superficie de la original tiene que seguir ahí.
+        distancia_remallado_mm = _distancia_maxima(
+            malla_escalada_original,
+            malla,
+            _detectar_huecos(malla_escalada_original),
+            excluir_en_referencia=False,
+        )
+        if distancia_remallado_mm > tolerancia_mm:
+            raise LimpiezaError(
+                "El remallado de respaldo con Blender deformó la figura: la distancia máxima a "
+                f"la malla original es {distancia_remallado_mm:.3f} mm, mayor que la tolerancia "
+                f"configurada ({tolerancia_mm} mm). No se escribió ningún archivo. Siguientes "
+                'pasos: corrige el modelo y vuelve a hacer "castkit ingesta" con una malla '
+                "nueva."
             )
 
     plano_z = float(malla.bounds[0][2]) + corte_base_mm
@@ -447,6 +481,8 @@ def limpiar_malla(
         )
 
     distancia_mm = _distancia_maxima(referencia_cortada, malla_limpia, zonas_excluidas)
+    if metodo == "blender":
+        distancia_mm = max(distancia_mm, distancia_remallado_mm)
     if distancia_mm > tolerancia_mm:
         raise LimpiezaError(
             "La malla limpia se alejó demasiado de la original: la distancia máxima medida es "
