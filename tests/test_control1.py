@@ -68,12 +68,12 @@ def _preparar_diseno_limpio(
 
 
 def test_control1_genera_cuatro_png_con_nombre_de_version_y_medidas_sobreimpresas(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, blender_falso: object
 ) -> None:
     carpeta = _preparar_diseno_limpio(tmp_path, monkeypatch, alto_mm=80.0)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
 
-    rc = main(["control1", "guagua-pan", "--sin-blender"])
+    rc = main(["control1", "guagua-pan"])
     assert rc == 0
 
     esperados = [
@@ -107,7 +107,9 @@ def test_control1_genera_cuatro_png_con_nombre_de_version_y_medidas_sobreimpresa
             assert int(franja_superior.max()) > 180
             assert int(franja_inferior.max()) > 180
 
-            # Verificar que la zona central contiene el render de la figura.
+            # Verificar que la zona central contiene el render de la figura
+            # (el renderizador falso de Blender dibuja un patrón con variación
+            # real de píxeles, distinto para cada vista).
             zona_central = arr[80:500, 80:520, :]
             assert float(zona_central.std()) > 5.0
             hashes_centro.append(zona_central.tobytes())
@@ -117,13 +119,16 @@ def test_control1_genera_cuatro_png_con_nombre_de_version_y_medidas_sobreimpresa
 
 
 def test_control1_aprobacion_registra_fecha_y_habilita_paso_a_matriz(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    blender_falso: object,
 ) -> None:
     carpeta = _preparar_diseno_limpio(tmp_path, monkeypatch, alto_mm=40.0, cavidades=2)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
 
     # 1. Si se ejecuta control1 sin aprobar (queda "pendiente"), no puede pasar a matriz.
-    assert main(["control1", "guagua-pan", "--sin-blender"]) == 0
+    assert main(["control1", "guagua-pan"]) == 0
     datos_pend = cargar_diseno(carpeta)
     reg_pend = datos_pend["versiones"]["v1"]["parametros"]["control_1"]
     assert reg_pend["estado"] == "pendiente"
@@ -136,7 +141,7 @@ def test_control1_aprobacion_registra_fecha_y_habilita_paso_a_matriz(
     assert not (carpeta / "output" / "guagua-pan_v1_matriz.stl").exists()
 
     # 2. Al aprobar con --aprobar, registra estado="aprobado" y fecha de hoy.
-    assert main(["control1", "guagua-pan", "--aprobar", "--sin-blender"]) == 0
+    assert main(["control1", "guagua-pan", "--aprobar"]) == 0
     datos_aprob = cargar_diseno(carpeta)
     reg_aprob = datos_aprob["versiones"]["v1"]["parametros"]["control_1"]
     assert reg_aprob["estado"] == "aprobado"
@@ -151,27 +156,31 @@ def test_control1_aprobacion_registra_fecha_y_habilita_paso_a_matriz(
 
 
 def test_control1_rechazo_exige_motivo_lo_registra_y_bloquea_matriz(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    blender_falso: object,
 ) -> None:
     carpeta = _preparar_diseno_limpio(tmp_path, monkeypatch, alto_mm=50.0)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
 
     # 1. Rechazar sin --motivo falla y no registra nada en diseno.json.
-    rc_sin_motivo = main(["control1", "guagua-pan", "--rechazar", "--sin-blender"])
+    rc_sin_motivo = main(["control1", "guagua-pan", "--rechazar"])
     assert rc_sin_motivo == 2
     err = capsys.readouterr().err
     assert "--motivo" in err
     assert "control_1" not in cargar_diseno(carpeta)["versiones"]["v1"]["parametros"]
 
     # 2. Rechazar con --motivo en blanco falla y tampoco registra nada.
-    rc_vacio = main(["control1", "guagua-pan", "--rechazar", "--motivo", "   ", "--sin-blender"])
+    rc_vacio = main(["control1", "guagua-pan", "--rechazar", "--motivo", "   "])
     assert rc_vacio == 1
     assert "--motivo" in capsys.readouterr().err
     assert "control_1" not in cargar_diseno(carpeta)["versiones"]["v1"]["parametros"]
 
-    # 3. También desde la función Python directa exige motivo no vacío.
+    # 3. También desde la función Python directa exige motivo no vacío (esto se
+    # valida antes de tocar Blender, así que no necesita el renderizador falso).
     with pytest.raises(Control1Error, match="--motivo"):
-        ejecutar_control1(carpeta, decision="rechazado", motivo="  ", sin_blender=True)
+        ejecutar_control1(carpeta, decision="rechazado", motivo="  ")
 
     # 4. Rechazar con motivo válido lo registra en la versión con fecha
     # y deja el diseño sin avanzar.
@@ -182,7 +191,6 @@ def test_control1_rechazo_exige_motivo_lo_registra_y_bloquea_matriz(
             "--rechazar",
             "--motivo",
             "la cara quedó aplastada",
-            "--sin-blender",
         ]
     )
     assert rc_rechazo == 0
@@ -203,7 +211,10 @@ def test_control1_rechazo_exige_motivo_lo_registra_y_bloquea_matriz(
 
 
 def test_control1_interactivo_aprueba_y_rechaza_con_motivo(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    blender_falso: object,
 ) -> None:
     carpeta = _preparar_diseno_limpio(tmp_path, monkeypatch, alto_mm=45.0)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
@@ -211,14 +222,14 @@ def test_control1_interactivo_aprueba_y_rechaza_con_motivo(
     # 1. En terminal interactiva, responder "n" y dejar motivo vacío falla.
     respuestas = iter(["n", "   "])
     monkeypatch.setattr("builtins.input", lambda _: next(respuestas))
-    rc_mal = main(["control1", "guagua-pan", "--sin-blender"])
+    rc_mal = main(["control1", "guagua-pan"])
     assert rc_mal == 1
     assert "motivo" in capsys.readouterr().err
 
     # 2. Responder "n" y dar motivo válido registra el rechazo.
     respuestas_rechazo = iter(["n", "proporciones incorrectas"])
     monkeypatch.setattr("builtins.input", lambda _: next(respuestas_rechazo))
-    rc_rech = main(["control1", "guagua-pan", "--sin-blender"])
+    rc_rech = main(["control1", "guagua-pan"])
     assert rc_rech == 0
     reg_r = cargar_diseno(carpeta)["versiones"]["v1"]["parametros"]["control_1"]
     assert reg_r["estado"] == "rechazado"
@@ -226,7 +237,7 @@ def test_control1_interactivo_aprueba_y_rechaza_con_motivo(
 
     # 3. Responder "sí" registra la aprobación.
     monkeypatch.setattr("builtins.input", lambda _: "sí")
-    rc_aprob = main(["control1", "guagua-pan", "--sin-blender"])
+    rc_aprob = main(["control1", "guagua-pan"])
     assert rc_aprob == 0
     reg_a = cargar_diseno(carpeta)["versiones"]["v1"]["parametros"]["control_1"]
     assert reg_a["estado"] == "aprobado"
@@ -269,51 +280,70 @@ def test_matriz_cli_se_niega_si_control1_nunca_se_ejecuto(
     assert not (carpeta / "output" / "guagua-pan_v1_matriz.stl").exists()
 
 
-def test_control1_blender_sin_renders_recurre_a_matplotlib_y_no_reusa_pngs_viejos(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_control1_sin_blender_falla_y_menciona_blender_bin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Sin Blender instalado, `castkit control1` falla con código != 0 y explica cómo
+    instalar Blender LTS o configurar BLENDER_BIN. No existe ningún otro motor."""
+    import castkit.control1 as mod_c1
+    from castkit.blender import BlenderNotFoundError
+
+    carpeta = _preparar_diseno_limpio(tmp_path, monkeypatch, alto_mm=60.0)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+
+    def _sin_blender() -> Path:
+        raise BlenderNotFoundError(
+            "No se encontró el ejecutable de Blender. Instala Blender LTS "
+            "(la versión requerida está fijada en el archivo .blender-version) y "
+            "asegúrate de que el comando 'blender' esté en el PATH, o bien "
+            "configura la variable de entorno BLENDER_BIN con la ruta completa "
+            "al ejecutable de Blender."
+        )
+
+    monkeypatch.setattr(mod_c1, "find_blender", _sin_blender)
+
+    rc = main(["control1", "guagua-pan"])
+    assert rc != 0
+    err = capsys.readouterr().err
+    assert "BLENDER_BIN" in err
+    assert "Blender LTS" in err
+    assert not (carpeta / "output" / "guagua-pan_v1_render-frente.png").exists()
+
+    with pytest.raises(Control1Error, match="BLENDER_BIN"):
+        ejecutar_control1(carpeta)
+
+
+def test_control1_blender_sin_renders_lanza_error_y_no_deja_pngs_viejos(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, blender_falso: object
 ) -> None:
     import castkit.control1 as mod_c1
 
     carpeta = _preparar_diseno_limpio(tmp_path, monkeypatch, alto_mm=60.0)
-    # Renders de una corrida anterior que no deben confundirse con los nuevos.
-    primera = ejecutar_control1(carpeta, sin_blender=True)
-    marcas_previas = {r: r.stat().st_mtime_ns for r in primera["renders"]}
+    # Renders de una corrida anterior que no deben confundirse con los nuevos
+    # ni quedar huérfanos si la corrida de ahora falla.
+    primera = ejecutar_control1(carpeta)
+    rutas_previas = list(primera["renders"])
+    assert all(r.is_file() for r in rutas_previas)
 
-    monkeypatch.setattr(mod_c1, "find_blender", lambda: Path("/usr/bin/blender"))
     # Blender "termina bien" pero el script falló antes de escribir los PNG.
     monkeypatch.setattr(mod_c1, "run_blender_script", lambda script, *args: None)
 
-    resultado = ejecutar_control1(carpeta, sin_blender=False)
-    assert resultado["metodo"] == "matplotlib"
-    for ruta in resultado["renders"]:
-        assert ruta.is_file()
-        assert ruta.stat().st_mtime_ns != marcas_previas[ruta]
-        with Image.open(ruta) as img:
-            assert "Alto: 60.0 mm" in img.info.get("castkit_medidas", "")
+    with pytest.raises(Control1Error, match="no generó los renders"):
+        ejecutar_control1(carpeta)
+
+    for ruta in rutas_previas:
+        assert not ruta.is_file()
 
 
 def test_control1_invoca_blender_headless_cuando_esta_disponible(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, blender_falso: list
 ) -> None:
-    import castkit.control1 as mod_c1
-
     carpeta = _preparar_diseno_limpio(tmp_path, monkeypatch, alto_mm=60.0)
-    llamadas_blender: list[tuple[Path, tuple[str, ...]]] = []
 
-    monkeypatch.setattr(mod_c1, "find_blender", lambda: Path("/usr/bin/blender"))
-
-    def _fake_run_blender(script: Path, *args: str) -> None:
-        llamadas_blender.append((script, args))
-        for idx, ruta_str in enumerate(args[1:5]):
-            img = Image.new("RGB", (600, 600), color=(60 + idx * 30, 80 + idx * 20, 110))
-            img.save(ruta_str, format="PNG")
-
-    monkeypatch.setattr(mod_c1, "run_blender_script", _fake_run_blender)
-
-    resultado = ejecutar_control1(carpeta, decision="aprobado", sin_blender=False)
+    resultado = ejecutar_control1(carpeta, decision="aprobado")
     assert resultado["metodo"] == "blender"
-    assert len(llamadas_blender) == 1
-    assert llamadas_blender[0][0].name == "render_vistas.py"
+    assert len(blender_falso) == 1
+    assert blender_falso[0][0].name == "render_vistas.py"
 
     for ruta in resultado["renders"]:
         assert ruta.is_file()
@@ -327,7 +357,7 @@ def test_control1_con_blender_headless_genera_los_cuatro_renders(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     carpeta = _preparar_diseno_limpio(tmp_path, monkeypatch, alto_mm=60.0)
-    resultado = ejecutar_control1(carpeta, decision="aprobado", sin_blender=False)
+    resultado = ejecutar_control1(carpeta, decision="aprobado")
     assert resultado["metodo"] == "blender"
     for ruta in resultado["renders"]:
         assert ruta.is_file()
@@ -344,20 +374,30 @@ def test_control1_con_blender_headless_genera_los_cuatro_renders(
     ],
     ids=["timeout", "no-ejecutable"],
 )
-def test_control1_blender_colgado_o_no_ejecutable_recurre_a_matplotlib(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: Exception
+def test_control1_blender_colgado_o_no_ejecutable_termina_en_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, blender_falso: object, error: Exception
 ) -> None:
     import castkit.control1 as mod_c1
 
     carpeta = _preparar_diseno_limpio(tmp_path, monkeypatch, alto_mm=60.0)
-    monkeypatch.setattr(mod_c1, "find_blender", lambda: Path("/usr/bin/blender"))
 
     def _fake_run_blender(script: Path, *args: str) -> None:
         raise error
 
     monkeypatch.setattr(mod_c1, "run_blender_script", _fake_run_blender)
 
-    resultado = ejecutar_control1(carpeta, sin_blender=False)
-    assert resultado["metodo"] == "matplotlib"
-    for ruta in resultado["renders"]:
-        assert ruta.is_file()
+    with pytest.raises(Control1Error) as excinfo:
+        ejecutar_control1(carpeta)
+
+    mensaje = str(excinfo.value)
+    if isinstance(error, subprocess.TimeoutExpired):
+        assert "300" in mensaje
+        assert "tiempo de espera" in mensaje
+    else:
+        assert type(error).__name__ in mensaje
+        assert "blender no es ejecutable" in mensaje
+
+    carpeta_output = carpeta / "output"
+    for vista in VISTAS_CONTROL1:
+        nombres = list(carpeta_output.glob(f"*render-{vista}.png"))
+        assert nombres == []

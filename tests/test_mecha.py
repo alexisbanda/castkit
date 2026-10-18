@@ -1,11 +1,9 @@
-"""Tests para `castkit mecha`, fallback de Blender en `limpieza`, proveedores
-`fal`/`tripo3d`, `ficha.md` y el comando extremo a extremo `castkit flujo`."""
+"""Tests para `castkit mecha`, fallback de Blender en `limpieza`, el proveedor
+`tripo3d`, `ficha.md` y el comando extremo a extremo `castkit flujo`."""
 
 from __future__ import annotations
 
 import hashlib
-import io
-import json
 import sys
 from pathlib import Path
 
@@ -216,13 +214,11 @@ def test_limpieza_usa_respaldo_de_blender_cuando_python_no_cierra_la_malla(
     assert "deformó la figura" in capsys.readouterr().err
 
 
-def test_proveedores_fal_y_tripo3d_validan_api_key_y_descargan_stl(
+def test_proveedor_tripo3d_valida_api_key(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    import urllib.request
-
     disenos_dir = tmp_path / "disenos"
     disenos_dir.mkdir()
     monkeypatch.chdir(disenos_dir)
@@ -232,52 +228,40 @@ def test_proveedores_fal_y_tripo3d_validan_api_key_y_descargan_stl(
 
     _dar_alta("vela-ia", brief, material="cera", alto_mm=25.0, cavidades=1)
 
-    # Sin FAL_KEY falla indicando la variable
-    monkeypatch.delenv("FAL_KEY", raising=False)
-    rc = main(["generar", "vela-ia", "--proveedor", "fal"])
-    assert rc != 0
-    assert "FAL_KEY" in capsys.readouterr().err
-
     # Sin TRIPO_API_KEY falla indicando la variable
     monkeypatch.delenv("TRIPO_API_KEY", raising=False)
     rc = main(["generar", "vela-ia", "--proveedor", "tripo3d"])
     assert rc != 0
     assert "TRIPO_API_KEY" in capsys.readouterr().err
 
-    # Con FAL_KEY y respuesta HTTP simulada descarga y convierte el modelo a STL
-    monkeypatch.setenv("FAL_KEY", "test-fal-key")
-    stl_bytes = CUBE_STL.read_bytes()
 
-    class _FakeResp:
-        def __init__(self, payload: bytes) -> None:
-            self._buf = io.BytesIO(payload)
+def test_proveedor_fal_fue_retirado_y_lista_los_disponibles(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    disenos_dir = tmp_path / "disenos"
+    disenos_dir.mkdir()
+    monkeypatch.chdir(disenos_dir)
+    brief = tmp_path / "brief_src"
+    brief.mkdir()
+    (brief / "ref.png").write_bytes(b"\x89PNG\r\n\x1a\n")
 
-        def read(self) -> bytes:
-            return self._buf.read()
+    _dar_alta("vela-ia", brief, material="cera", alto_mm=25.0, cavidades=1)
 
-        def __enter__(self) -> _FakeResp:
-            return self
-
-        def __exit__(self, *args: object) -> None:
-            pass
-
-    def _fake_urlopen(req: object, timeout: float = 60) -> _FakeResp:
-        url = req.full_url if hasattr(req, "full_url") else str(req)
-        if "fal.run" in url:
-            return _FakeResp(
-                json.dumps({"model_mesh": {"url": "https://cdn.fal.ai/mesh.stl"}}).encode()
-            )
-        return _FakeResp(stl_bytes)
-
-    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
     rc = main(["generar", "vela-ia", "--proveedor", "fal"])
-    assert rc == 0
-    assert (disenos_dir / "vela-ia" / "input" / "vela-ia_v1_bruto.stl").is_file()
+    assert rc != 0
+    err = capsys.readouterr().err
+    assert "Proveedores disponibles:" in err
+    lista_disponibles = err.split("Proveedores disponibles:", 1)[1]
+    disponibles = {parte.strip().strip(".") for parte in lista_disponibles.split(",")}
+    assert disponibles == {"comando", "imagen-3d", "tripo3d"}
 
 
 def test_flujo_completo_genera_matriz_y_ficha_tecnica_en_espanol(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    blender_falso: object,
 ) -> None:
     disenos_dir = tmp_path / "disenos"
     disenos_dir.mkdir()
@@ -314,6 +298,7 @@ def test_flujo_sin_terminal_se_detiene_en_control1_sin_aprobar(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    blender_falso: object,
 ) -> None:
     disenos_dir = tmp_path / "disenos"
     disenos_dir.mkdir()

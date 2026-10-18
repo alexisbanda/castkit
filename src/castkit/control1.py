@@ -23,8 +23,6 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-import matplotlib
-import numpy as np
 import trimesh
 from PIL import Image, ImageDraw, ImageFont
 from PIL.PngImagePlugin import PngInfo
@@ -39,33 +37,10 @@ from castkit.versiones import (
     registrar_parametros,
 )
 
-matplotlib.use("Agg")
-
 VISTAS_CONTROL1: tuple[str, ...] = ("frente", "perfil", "arriba", "3-4")
 DECISIONES_CONTROL1: tuple[str, ...] = ("aprobado", "rechazado", "pendiente")
 
 _SCRIPT_RENDER_BLENDER = Path(__file__).parent / "blender_scripts" / "render_vistas.py"
-
-# Orientaciones de cámara (elev, azim) en matplotlib para cada vista:
-# - frente: mirando desde -Y hacia +Y con +Z arriba
-# - perfil: mirando desde +X hacia -X con +Z arriba
-# - arriba: mirando desde +Z hacia -Z (planta)
-# - 3-4: vista tres cuartos desde (+X, -Y, +Z) con +Z arriba
-_ANGULOS_MATPLOTLIB: dict[str, tuple[float, float]] = {
-    "frente": (0.0, -90.0),
-    "perfil": (0.0, 0.0),
-    "arriba": (90.0, -90.0),
-    "3-4": (25.0, -45.0),
-}
-
-# Tinte base sutil por vista para diferenciar inequívocamente la orientación
-# incluso en geometrías perfectamente simétricas como un cubo.
-_TINTE_VISTA: dict[str, tuple[float, float, float]] = {
-    "frente": (0.86, 0.90, 0.96),
-    "perfil": (0.94, 0.89, 0.84),
-    "arriba": (0.86, 0.95, 0.88),
-    "3-4": (0.91, 0.88, 0.95),
-}
 
 
 class Control1Error(VersionError):
@@ -177,63 +152,6 @@ def _sobreimprimir_medidas_png(
     return leyenda_completa
 
 
-def _renderizar_con_matplotlib(
-    malla: trimesh.Trimesh,
-    rutas_vistas: dict[str, Path],
-) -> None:
-    """Renderiza las 4 vistas de ``malla`` en PNG (600x600) usando matplotlib Agg."""
-    import matplotlib.pyplot as plt
-    from mpl_toolkits.mplot3d.art3d import Poly3DCollection
-
-    copia = malla.copy()
-    # Si la malla tiene muchas caras, simplificar solo la vista previa para que
-    # el render por software sea rápido sin alterar la malla limpia en disco.
-    if len(copia.faces) > 6000:
-        copia = copia.simplify_quadric_decimation(face_count=6000)
-
-    min_xyz, max_xyz = copia.bounds
-    centro = (min_xyz + max_xyz) / 2.0
-    vertices = copia.vertices - centro
-    triangulos = vertices[copia.faces]
-
-    normales = np.asarray(copia.face_normals, dtype=np.float64)
-    luz_dir = np.array([0.38, -0.58, 0.72], dtype=np.float64)
-    luz_dir /= np.linalg.norm(luz_dir)
-    intensidad = np.clip(normales @ luz_dir, -1.0, 1.0)
-    brillo = 0.38 + 0.52 * (0.5 * (intensidad + 1.0))
-
-    max_ext = float(np.max(max_xyz - min_xyz))
-    semirango = max(max_ext * 0.68, 1.0)
-
-    for vista, ruta_png in rutas_vistas.items():
-        elev, azim = _ANGULOS_MATPLOTLIB[vista]
-        tinte = np.array(_TINTE_VISTA[vista], dtype=np.float64)
-        colores_caras = np.clip(brillo[:, None] * tinte[None, :], 0.12, 0.98)
-
-        fig = plt.figure(figsize=(6.0, 6.0), dpi=100, facecolor="#242933")
-        ax = fig.add_subplot(111, projection="3d", facecolor="#242933")
-        ax.set_proj_type("ortho")
-
-        coleccion = Poly3DCollection(
-            triangulos,
-            facecolors=colores_caras,
-            edgecolors=(0.15, 0.18, 0.22, 0.28),
-            linewidths=0.35,
-        )
-        ax.add_collection3d(coleccion)
-
-        ax.set_xlim(-semirango, semirango)
-        ax.set_ylim(-semirango, semirango)
-        ax.set_zlim(-semirango, semirango)
-        ax.set_box_aspect((1.0, 1.0, 1.0))
-        ax.view_init(elev=elev, azim=azim)
-        ax.set_axis_off()
-        fig.subplots_adjust(left=0.0, right=1.0, bottom=0.08, top=0.92)
-
-        fig.savefig(ruta_png, format="png", dpi=100, facecolor=fig.get_facecolor())
-        plt.close(fig)
-
-
 def _registrar_control1_en_diseno(carpeta: Path, registro: dict[str, Any]) -> None:
     """Registra ``registro`` en ``versiones.v<actual>.parametros.control_1``."""
     registrar_parametros(carpeta, "control-1", registro)
@@ -298,9 +216,14 @@ def ejecutar_control1(
     *,
     decision: str | None = None,
     motivo: str | None = None,
-    sin_blender: bool = False,
 ) -> dict[str, Any]:
-    """Genera los 4 PNG del Punto de control 1 y registra el estado en `diseno.json`."""
+    """Genera los 4 PNG del Punto de control 1 y registra el estado en `diseno.json`.
+
+    Los renders se generan siempre con Blender en modo headless (motor CYCLES
+    en CPU, vía :func:`castkit.blender.run_blender_script`). No existe ningún
+    motor de respaldo: si Blender no está disponible, falla o se cuelga, se
+    lanza :class:`Control1Error` sin dejar PNG a medio generar.
+    """
     estado, motivo_limpio = validar_decision_control1(decision, motivo)
 
     carpeta = Path(carpeta)
@@ -322,32 +245,51 @@ def ejecutar_control1(
         rutas_vistas[vista] = carpeta_output / nombre_png
         nombres_renders.append(nombre_png)
 
-    # Borramos renders previos para no confundirlos con los de esta corrida.
+    # Borramos renders previos para no confundirlos con los de esta corrida,
+    # ni dejar PNG viejos si la corrida de Blender de ahora falla.
     for ruta_png in rutas_vistas.values():
         ruta_png.unlink(missing_ok=True)
 
-    metodo = "matplotlib"
-    if not sin_blender:
-        try:
-            find_blender()
-            run_blender_script(
-                _SCRIPT_RENDER_BLENDER,
-                str(ruta_limpia),
-                str(rutas_vistas["frente"]),
-                str(rutas_vistas["perfil"]),
-                str(rutas_vistas["arriba"]),
-                str(rutas_vistas["3-4"]),
-            )
-            faltantes = [str(r) for r in rutas_vistas.values() if not r.is_file()]
-            if faltantes:
-                raise RuntimeError(f"Blender no generó los renders: {', '.join(faltantes)}")
-            metodo = "blender"
-        except (BlenderNotFoundError, RuntimeError, OSError, subprocess.TimeoutExpired):
-            # Blender ausente, no ejecutable, colgado o sin renders: recurrimos a matplotlib.
-            _renderizar_con_matplotlib(malla, rutas_vistas)
-            metodo = "matplotlib"
-    else:
-        _renderizar_con_matplotlib(malla, rutas_vistas)
+    try:
+        find_blender()
+    except BlenderNotFoundError as exc:
+        raise Control1Error(
+            f"No se puede generar el punto de control 1 sin Blender: {exc}"
+        ) from exc
+
+    try:
+        run_blender_script(
+            _SCRIPT_RENDER_BLENDER,
+            str(ruta_limpia),
+            str(rutas_vistas["frente"]),
+            str(rutas_vistas["perfil"]),
+            str(rutas_vistas["arriba"]),
+            str(rutas_vistas["3-4"]),
+        )
+    except subprocess.TimeoutExpired as exc:
+        for ruta_png in rutas_vistas.values():
+            ruta_png.unlink(missing_ok=True)
+        raise Control1Error(
+            "Blender superó el tiempo de espera "
+            f"({exc.timeout:.0f} s) al generar los renders del punto de control 1."
+        ) from exc
+    except (RuntimeError, OSError) as exc:
+        for ruta_png in rutas_vistas.values():
+            ruta_png.unlink(missing_ok=True)
+        raise Control1Error(
+            "Blender falló al generar los renders del punto de control 1 "
+            f"({type(exc).__name__}): {exc}"
+        ) from exc
+
+    faltantes = [str(r) for r in rutas_vistas.values() if not r.is_file()]
+    if faltantes:
+        for ruta_png in rutas_vistas.values():
+            ruta_png.unlink(missing_ok=True)
+        raise Control1Error(
+            "Blender no generó los renders del punto de control 1: " + ", ".join(faltantes)
+        )
+
+    metodo = "blender"
 
     leyendas: dict[str, str] = {}
     for vista, ruta_png in rutas_vistas.items():

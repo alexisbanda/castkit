@@ -28,7 +28,7 @@ voxel_mm = 0.3
 
 [generacion]
 # Proveedor enchufable por defecto para generar la malla 3D a partir de los
-# insumos del brief ("comando", "imagen-3d", "tripo3d" o "fal").
+# insumos del brief ("comando", "imagen-3d" o "tripo3d").
 proveedor = "comando"
 
 # Comando externo para el proveedor "comando". Se ejecuta pasando la ruta de
