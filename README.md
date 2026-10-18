@@ -13,7 +13,9 @@ Castkit — Agent-assisted pipeline that turns 3D models into production-ready m
 uv sync
 ```
 
-Esto instala Python 3.12 (si falta) y todas las dependencias del proyecto (CadQuery, trimesh, manifold3d, fast-simplification, networkx) junto con las de desarrollo (pytest, ruff), siguiendo `pyproject.toml` y `uv.lock`.
+Esto instala Python 3.12 (si falta) y todas las dependencias del proyecto, incluidas las de
+desarrollo (pytest, ruff), según lo declarado en [`pyproject.toml`](pyproject.toml) y fijado en
+`uv.lock`.
 
 ## Tests
 
@@ -140,8 +142,11 @@ versión que los produjo:
 
 ## Entregar la malla en bruto
 
-La malla en bruto (de imagen→3D, escaneo o escultura) se obtiene fuera de castkit.
-`castkit ingesta` la incorpora a la versión actual del diseño:
+Si ya cuentas con un `.stl` (de un escaneo 3D, una escultura digital o uno comprado/encargado a
+un tercero), `castkit ingesta` lo incorpora a la versión actual del diseño. Si en cambio quieres
+que castkit obtenga o genere la malla a partir del brief (imágenes, documentos, texto/prompt),
+usa `castkit generar` (ver la sección «Generar la malla en bruto desde el brief» más abajo) en
+lugar de `ingesta`.
 
 ```bash
 uv run castkit ingesta guagua-pan ~/Descargas/guagua.stl
@@ -203,6 +208,22 @@ salió la malla en bruto (`version_bruto`), su huella `sha256`, las caras result
 la distancia máxima medida (`distancia_max_mm`). Volver a limpiar la misma versión reemplaza el
 archivo y el registro, avisando en pantalla.
 
+### Respaldo con Blender (remallado por vóxeles)
+
+Si el cierre rápido en Python (paso 4) no logra dejar la malla cerrada (watertight) y no se pasa
+`--sin-blender`, castkit reintenta automáticamente con un **remallado por vóxeles dentro de
+Blender** (tamaño de vóxel `voxel_mm`), partiendo de la malla ya orientada y escalada. Si Blender
+tampoco está disponible, se devuelve el error original de Python con una nota sobre cómo
+instalar Blender LTS o configurar `BLENDER_BIN`.
+
+Cuando se usa este respaldo se registra `metodo: "blender"` y `voxel_mm` (con el cierre en
+Python, `metodo` es `"python"` y no se registra `voxel_mm`). La fidelidad, en este caso, se mide
+contra la malla original ya orientada y escalada (no contra la remallada): se toma la peor (mayor)
+distancia entre esa medición y la del paso 8, y si supera `tolerancia_mm` se rechaza el resultado
+sin escribir ningún archivo. Hoy en día este remallado por vóxeles casi nunca entrega piezas
+fieles cuando la malla de entrada está muy abierta, y suele terminar fallando con un mensaje que
+explica la distancia medida (ver #28).
+
 ### Opciones
 
 | Opción | Obligatoria | Valores aceptados |
@@ -213,14 +234,17 @@ archivo y el registro, avisando en pantalla.
 | `--tolerancia-mm` | no | número mayor que 0 (si se omite, se usa `config/fabricacion.toml`) |
 | `--corte-base-mm` | no | número mayor que 0 (si se omite, se usa `config/fabricacion.toml`) |
 | `--agujero-max-mm` | no | número mayor que 0 (si se omite, se usa `config/fabricacion.toml`) |
+| `--voxel-mm` | no | número mayor que 0: tamaño de vóxel para el remallado de respaldo en Blender (si se omite, se usa `config/fabricacion.toml`) |
+| `--sin-blender` | no | desactiva el respaldo con remallado de Blender; si Python no cierra la malla, falla directamente |
 
 Un valor inválido en cualquiera de estas opciones se rechaza con un mensaje en español que
 nombra la opción.
 
 ### `config/fabricacion.toml`
 
-Los valores de partida de `caras_max`, `tolerancia_mm`, `corte_base_mm` y `agujero_max_mm` viven,
-versionados en el repositorio, en la sección `[limpieza]` de `config/fabricacion.toml`:
+Los valores de partida de `caras_max`, `tolerancia_mm`, `corte_base_mm`, `agujero_max_mm` y
+`voxel_mm` viven, versionados en el repositorio, en la sección `[limpieza]` de
+`config/fabricacion.toml`:
 
 ```toml
 [limpieza]
@@ -228,10 +252,55 @@ caras_max = 200000
 tolerancia_mm = 0.2
 corte_base_mm = 0.5
 agujero_max_mm = 10
+voxel_mm = 0.3
 ```
 
 Cada opción de `castkit limpieza` sobrescribe, una a una, el valor correspondiente de aquí; las
 demás se siguen leyendo de la configuración.
+
+## Añadir el canal de mecha (figuras de cera)
+
+Cuando el material del diseño es `cera`, `castkit mecha` perfora un canal cilíndrico vertical
+pasante por el centro `(x, y)` de la malla limpia de la versión actual
+(`work/<diseño>_v<actual>_limpia.stl`), pensado para pasar la mecha de la vela:
+
+```bash
+uv run castkit mecha guagua-pan
+```
+
+Si el material del diseño es `porcelana-fria` o `silicona`, este paso no modifica la malla
+limpia (solo registra que no se aplicó, junto con el material). Si es `cera`:
+
+1. Calcula el espesor mínimo de pared lateral que quedaría entre el canal y el exterior de la
+   figura.
+2. Si ese espesor es menor que `espesor_minimo_pared_mm` y no se pasa `--forzar`, se detiene: en
+   una terminal interactiva pregunta si continuar; sin terminal, falla indicando el espesor
+   medido.
+3. Resta el cilindro de la malla limpia (unión booleana con `manifold3d`) y comprueba que el
+   resultado siga cerrado (watertight) y con volumen positivo.
+4. Reemplaza `work/<diseño>_v<actual>_limpia.stl` con la malla ya perforada.
+
+Registra, con `registrar_parametros` en `versiones.v<actual>.parametros.mecha`: si se aplicó
+(`aplicado`), el `material`, `diametro_mecha_mm`, `espesor_minimo_pared_mm`, el espesor de pared
+realmente medido (`espesor_pared_medido_mm`), el centro del canal (`eje_xy_mm`) y las caras
+resultantes.
+
+### Opciones
+
+| Opción | Obligatoria | Valores aceptados |
+| --- | --- | --- |
+| `nombre` (posicional) | sí | nombre de un diseño ya dado de alta y con malla limpia |
+| `--diametro-mm` | no | número mayor que 0 (por defecto `diametro_mecha_mm` en `config/fabricacion.toml`) |
+| `--espesor-minimo-mm` | no | número mayor que 0 (por defecto `espesor_minimo_pared_mm` en `config/fabricacion.toml`) |
+| `--forzar` | no | continúa sin preguntar aunque el espesor de pared quede bajo el mínimo configurado |
+
+### `[mecha]` en `config/fabricacion.toml`
+
+```toml
+[mecha]
+diametro_mecha_mm = 3.0
+espesor_minimo_pared_mm = 1.2
+```
 
 ## Generar la malla en bruto desde el brief (con proveedor enchufable)
 
@@ -250,14 +319,54 @@ uv run castkit generar guagua-pan --prompt "guagua de pan tradicional sin socava
   un STL legible y lo guarda en `input/` registrando el proveedor, los archivos de `brief/`
   utilizados, el prompt, `sha256`, `caras` y `vertices` en `versiones.v<actual>.parametros.generacion`.
 
+Los `.pdf` y `.ai` del brief solo los recibe el proveedor `comando` (vía la variable de entorno
+`CASTKIT_INSUMOS`, ver abajo): los demás proveedores integrados (`imagen-3d`, `tripo3d`, `fal`)
+ignoran documentos y mallas `.stl` del brief, y solo usan la primera imagen de `brief/` junto con
+el texto/prompt.
+
+### Proveedores integrados
+
+| Proveedor | Qué usa del brief | Requiere |
+| --- | --- | --- |
+| `comando` | todos los insumos (imágenes, `.pdf`/`.ai`, prompt); se los pasa a un comando externo | `comando` en `[generacion]`; si está vacío y hay imágenes, recurre a `imagen-3d` |
+| `imagen-3d` | solo la primera imagen (reconstructor volumétrico local, sin red) | nada (no necesita claves de API) |
+| `tripo3d` | la primera imagen (Imagen→3D) o, si no hay imágenes, el prompt (Texto→3D), vía la API v3 de Tripo | variable de entorno `TRIPO_API_KEY` |
+| `fal` | la primera imagen y, si hay, el prompt, vía Fal.ai (`fal-ai/trellis` por defecto) | variable de entorno `FAL_KEY` |
+
+El proveedor `tripo3d` pide solo geometría (sin texturas ni PBR), registra `tripo_modelo` y
+`tripo_task_id` en `versiones.v<actual>.parametros.generacion`, y gira el GLB descargado de
+Y-arriba (convención de glTF/GLB) a Z-arriba (convención de castkit) antes de exportarlo a STL.
+
+El proveedor `comando` ejecuta el comando configurado pasándole, en variables de entorno:
+`CASTKIT_SALIDA_STL` (ruta del `.stl` de salida, también como último argumento), `CASTKIT_INSUMOS`
+(rutas de imágenes y documentos separadas por `:`, o `;` en Windows) y `CASTKIT_PROMPT` (el texto
+combinado del brief más `--prompt`).
+
 ### Opciones de `castkit generar`
 
 | Opción | Obligatoria | Valores aceptados |
 | --- | --- | --- |
 | `nombre` (posicional) | sí | nombre de un diseño ya dado de alta |
-| `--proveedor` | no | nombre del proveedor enchufable registrado o configurado en `config/fabricacion.toml` |
+| `--proveedor` | no | `comando`, `imagen-3d`, `tripo3d`, `fal`, o un proveedor registrado en tiempo de ejecución (si se omite, se usa `config/fabricacion.toml`) |
 | `--prompt` | no | texto o prompt de contexto adicional para el generador 3D |
 | `--reemplazar` | no | reemplaza sin preguntar la malla ya guardada en la versión actual, si existe |
+
+### `[generacion]` en `config/fabricacion.toml`
+
+```toml
+[generacion]
+proveedor = "comando"
+comando = ""
+tripo_modelo = "v2.5-20250123"
+tripo_espera_max_s = 600
+```
+
+- `proveedor`: proveedor por defecto cuando no se pasa `--proveedor`.
+- `comando`: comando externo para el proveedor `comando` (ver arriba); si está vacío, recurre a
+  `imagen-3d` cuando hay imágenes en el brief.
+- `tripo_modelo`: versión del modelo de Tripo3D (API v3) usada por el proveedor `tripo3d`.
+- `tripo_espera_max_s`: plazo máximo, en segundos, que el proveedor `tripo3d` espera a que la
+  tarea termine antes de fallar.
 
 ## Punto de control 1: renders de las 4 vistas y aprobación (`castkit control1`)
 
@@ -292,7 +401,8 @@ La decisión (`aprobado`, `rechazado` con motivo obligatorio, o `pendiente`) y l
 ## Generar la matriz imprimible (`.stl`) en modo `figura` o `cubeta`
 
 Una vez limpia la malla (`work/<diseño>_v<actual>_limpia.stl`), `castkit matriz` construye el
-archivo `.stl` final de la matriz para mandarlo a la impresora 3D de filamento:
+archivo `.stl` final de la matriz para mandarlo a la impresora 3D, ya sea en filamento (FDM) o
+en resina (MSLA):
 
 ```bash
 # Modo figura: solo la figura apoyada sobre su base plana
@@ -311,6 +421,21 @@ El resultado se guarda en `guagua-pan/output/guagua-pan_v1_matriz.stl` (cerrado 
 parámetros geométricos en mm, las dimensiones exteriores, el volumen de una figura en cm³ y (en
 modo `cubeta`) los mililitros estimados de silicona.
 
+Los modos `figura` y `cubeta` escriben siempre el mismo archivo,
+`output/<diseño>_v<actual>_matriz.stl`: generar un modo después del otro para la misma versión
+sobrescribe el `.stl` anterior (el segundo modo pisa al primero). Si necesitas conservar ambos,
+copia el `.stl` a otro nombre antes de generar el segundo modo.
+
+### Ficha técnica
+
+Junto al `.stl`, `castkit matriz` escribe `output/<diseño>_v<actual>_ficha.md`: una ficha técnica
+en Markdown con el material final de la figura, el modo de matriz impresa, las cavidades en la
+matriz, la altura objetivo de la figura, las dimensiones exteriores de la matriz, el volumen por
+figura en cm³, (en modo `cubeta`) la silicona líquida estimada en ml, el nombre del archivo `.stl`
+y una advertencia de taller según el material (por ejemplo, verificar que el canal de mecha quede
+despejado antes de verter la silicona en figuras de cera, o aplicar desmoldante obligatoriamente
+en moldes de silicona sobre silicona).
+
 ### Opciones de `castkit matriz`
 
 | Opción | Obligatoria | Valores aceptados |
@@ -322,6 +447,51 @@ modo `cubeta`) los mililitros estimados de silicona.
 | `--espesor-pared-mm` | no | número mayor que 0 (por defecto `3.0` en `config/fabricacion.toml`) |
 | `--margen-superior-mm` | no | número mayor que 0 (por defecto `10.0` en `config/fabricacion.toml`) |
 | `--separacion-cavidades-mm` | no | número mayor que 0 (por defecto `10.0` en `config/fabricacion.toml`) |
+
+### `[matriz]` en `config/fabricacion.toml`
+
+```toml
+[matriz]
+espesor_base_mm = 3.0
+margen_silicona_mm = 10.0
+espesor_pared_mm = 3.0
+margen_superior_mm = 10.0
+separacion_cavidades_mm = 10.0
+```
+
+Cada opción de `castkit matriz` sobrescribe, una a una, el valor correspondiente de aquí; las
+demás se siguen leyendo de la configuración.
+
+## Ejecutar el flujo completo (`castkit flujo`)
+
+`castkit flujo` encadena, para un diseño ya dado de alta, `generar` → `limpieza` → `mecha` (solo
+si el material del diseño es `cera`) → `control1` → `matriz`, deteniéndose en el primer paso que
+falle:
+
+```bash
+# Interactivo: pregunta por la aprobación del punto de control 1 antes de generar la matriz
+uv run castkit flujo guagua-pan --modo cubeta --prompt "guagua de pan tradicional"
+
+# En script o CI: aprueba el punto de control 1 sin preguntar
+uv run castkit flujo guagua-pan --modo figura --aprobar-control1
+```
+
+Cada etapa encadenada usa sus valores por defecto de `config/fabricacion.toml` (`flujo` no expone
+las opciones finas de cada etapa, como `--caras-max` o `--espesor-pared-mm`): solo pasa
+`--proveedor`, `--prompt` y `--reemplazar` a `generar`, y `--modo` a `matriz`. Si el punto de
+control 1 queda pendiente o rechazado (y no se pasa `--aprobar-control1`, o se responde que no en
+una terminal interactiva), el flujo se detiene antes de generar la matriz.
+
+### Opciones
+
+| Opción | Obligatoria | Valores aceptados |
+| --- | --- | --- |
+| `nombre` (posicional) | sí | nombre de un diseño ya dado de alta |
+| `--modo` | no | `figura`, `cubeta` (se pasa a `castkit matriz`) |
+| `--proveedor` | no | proveedor enchufable de generación 3D (se pasa a `castkit generar`) |
+| `--prompt` | no | prompt adicional para la generación 3D (se pasa a `castkit generar`) |
+| `--reemplazar` | no | reemplaza la malla en bruto si ya existía (se pasa a `castkit generar`) |
+| `--aprobar-control1` | no | aprueba el punto de control 1 sin preguntar, pensado para scripts o CI |
 
 ## Integración continua
 

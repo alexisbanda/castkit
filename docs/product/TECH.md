@@ -7,7 +7,7 @@
 ## Stack
 
 - Python 3.12, con entorno y dependencias gestionados por uv (`pyproject.toml` + `uv.lock`).
-- CadQuery y/o trimesh/manifold3d para la generación geométrica de la matriz final (modo `figura` o modo `cubeta` multicavidad con borde exterior).
+- manifold3d para la generación geométrica de la matriz final (modo `figura` o modo `cubeta` multicavidad con borde exterior). CadQuery es una dependencia declarada en `pyproject.toml` pero sin uso real en el código; se retira en #37.
 - trimesh, manifold3d y fast-simplification para el procesamiento, limpieza y validación de mallas.
 - Blender LTS en modo headless (scripts `bpy`) para el remallado de respaldo y los renders, invocado como subproceso (`blender --background --python …`); el ejecutable se toma de `BLENDER_BIN` o del PATH.
 - Arquitectura de **proveedor enchufable** (protocolo/interfaz en Python configurable en `config/fabricacion.toml`) para la generación de mallas 3D a partir de imágenes, documentos (`.pdf`, `.ai`) o prompts de texto.
@@ -56,7 +56,7 @@ Las reglas por material, la selección del proveedor de generación 3D y los par
 - [x] ¿Qué versión de Blender se fija y cómo se ejecuta en la CI? Decidido: LTS vigente como subproceso; en CI solo en Linux.
 - [x] ¿Cómo se integran los generadores de Imagen/Texto → 3D? Decidido: proveedor enchufable configurable, sin atarse a un único servicio.
 - [x] ¿Qué entrega la etapa de matriz para la impresora 3D? Decidido: un `.stl` de la matriz permitiendo elegir entre modo `figura` (figura + base) y modo `cubeta` (base + 1 o N figuras + borde exterior para verter silicona).
-- [ ] ¿Cuál será el primer proveedor enchufable concreto de Imagen/Texto → 3D a implementar tras el adaptador base (p. ej. Fal.ai/Hunyuan3D/Trellis, Tripo3D o Meshy)?
+- [x] ¿Cuál será el primer proveedor enchufable concreto de Imagen/Texto → 3D a implementar tras el adaptador base? Decidido: Tripo3D vía su API v3 (#36); además existen el reconstructor local `imagen-3d` y el proveedor `fal` (Fal.ai).
+- [x] ¿En qué formato se genera la ficha técnica y con qué herramienta? Decidido: Markdown, escrita en `output/<diseño>_v<n>_ficha.md` por `castkit matriz`.
 - [ ] Google Drive: ¿publicación mediante la API o mediante la carpeta sincronizada en el equipo? Si es la API, ¿cómo se guardan las credenciales sin exponerlas?
-- [ ] ¿En qué formato se genera la ficha técnica (Markdown, PDF o ambos) y con qué herramienta?
-- [ ] ¿Cómo se distinguen en la configuración los parámetros por tecnología de impresión (resina MSLA y filamento FDM)?
+- [ ] ¿Cómo se distinguen en la configuración los parámetros por tecnología de impresión (resina MSLA y filamento FDM)? Ver #29.
