@@ -19,6 +19,7 @@ from castkit.control1 import (
     Control1Error,
     ejecutar_control1,
     registrar_decision_control1,
+    verificar_control1_para_matriz,
 )
 from castkit.diseno import (
     LICENCIAS,
@@ -296,6 +297,12 @@ def _construir_parser() -> argparse.ArgumentParser:
         "--reemplazar",
         action="store_true",
         help="Reemplaza la malla en bruto si ya existía.",
+    )
+    flujo.add_argument(
+        "--aprobar-control1",
+        dest="aprobar_control1",
+        action="store_true",
+        help="Aprueba el punto de control 1 sin preguntar (para scripts o CI).",
     )
 
     return parser
@@ -944,7 +951,7 @@ def _ejecutar_flujo(args: argparse.Namespace) -> int:
 
     args_control1 = argparse.Namespace(
         nombre=args.nombre,
-        aprobar=not sys.stdin.isatty(),
+        aprobar=bool(getattr(args, "aprobar_control1", False)),
         rechazar=False,
         motivo=None,
         sin_blender=False,
@@ -952,6 +959,14 @@ def _ejecutar_flujo(args: argparse.Namespace) -> int:
     rc_c1 = _ejecutar_control1(args_control1)
     if rc_c1 != 0:
         return rc_c1
+
+    # El flujo se detiene en el punto de control 1 si nadie aprobó la figura.
+    try:
+        carpeta = ubicar_diseno(args.nombre)
+        verificar_control1_para_matriz(carpeta, cargar_diseno(carpeta), exigir_control1=True)
+    except (AltaError, VersionError, Control1Error) as exc:
+        print(f"Flujo detenido en el punto de control 1: {exc}", file=sys.stderr)
+        return 1
 
     args_matriz = argparse.Namespace(
         nombre=args.nombre,

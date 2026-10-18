@@ -131,7 +131,7 @@ def generar_matriz(
     espesor_pared_mm: float,
     margen_superior_mm: float,
     separacion_cavidades_mm: float,
-    exigir_control1: bool = False,
+    exigir_control1: bool = True,
 ) -> dict[str, Any]:
     """Construye y guarda `output/<diseño>_v<actual>_matriz.stl` en modo `figura` o `cubeta`."""
     validar_modo_matriz(modo)
@@ -155,10 +155,6 @@ def generar_matriz(
 
     carpeta = Path(carpeta)
     datos = cargar_diseno(carpeta)
-    try:
-        verificar_control1_para_matriz(carpeta, datos, exigir_control1=exigir_control1)
-    except Control1Error as exc:
-        raise MatrizError(str(exc)) from exc
 
     nombre_diseno = datos["nombre"]
     version_actual = datos["version_actual"]
@@ -166,6 +162,10 @@ def generar_matriz(
     cavidades = int(info_version["cavidades"])
 
     ruta_limpia = _localizar_malla_limpia(carpeta, datos)
+    try:
+        verificar_control1_para_matriz(carpeta, datos, exigir_control1=exigir_control1)
+    except Control1Error as exc:
+        raise MatrizError(str(exc)) from exc
     malla_figura = trimesh.load(ruta_limpia, file_type="stl", force="mesh")
 
     if not malla_figura.is_watertight or malla_figura.volume <= 0:

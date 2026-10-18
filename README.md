@@ -277,7 +277,7 @@ Los cuatro archivos se guardan en `output/` nombrados con la versión actual:
 - `guagua-pan_v1_render-arriba.png`
 - `guagua-pan_v1_render-3-4.png`
 
-La decisión (`aprobado`, `rechazado` con motivo obligatorio, o `pendiente`) y la fecha quedan registradas en `versiones.v1.parametros.control_1` dentro de `diseno.json`. Mientras el punto de control 1 esté pendiente o rechazado, `castkit matriz` rechaza generar la matriz e informa del motivo.
+La decisión (`aprobado`, `rechazado` con motivo obligatorio, o `pendiente`) y la fecha quedan registradas en `versiones.v1.parametros.control_1` dentro de `diseno.json`. Mientras el punto de control 1 no se haya ejecutado, o esté pendiente o rechazado, `castkit matriz` rechaza generar la matriz e informa del motivo. `castkit flujo` también se detiene en este punto: en una terminal interactiva pregunta si apruebas la figura, y en scripts o CI solo avanza a la matriz si se le pasa `--aprobar-control1`.
 
 ### Opciones de `castkit control1`
 

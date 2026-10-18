@@ -10,6 +10,7 @@ import pytest
 import trimesh
 
 from castkit.cli import main
+from castkit.control1 import registrar_decision_control1
 from castkit.diseno import DatosAlta, crear_diseno
 from castkit.ingesta import ingerir_malla
 from castkit.limpieza import limpiar_malla
@@ -56,6 +57,7 @@ def _preparar_diseno_limpio(
         corte_base_mm=0.5,
         agujero_max_mm=10.0,
     )
+    registrar_decision_control1(carpeta, decision="aprobado")
     return carpeta
 
 

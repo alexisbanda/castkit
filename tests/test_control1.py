@@ -256,6 +256,41 @@ def test_control1_validaciones_de_error_y_exigir_control1(
         )
 
 
+def test_matriz_cli_se_niega_si_control1_nunca_se_ejecuto(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    carpeta = _preparar_diseno_limpio(tmp_path, monkeypatch, alto_mm=40.0)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+
+    rc = main(["matriz", "guagua-pan", "--modo", "figura"])
+    assert rc == 1
+    assert "control 1" in capsys.readouterr().err
+    assert not (carpeta / "output" / "guagua-pan_v1_matriz.stl").exists()
+
+
+def test_control1_blender_sin_renders_recurre_a_matplotlib_y_no_reusa_pngs_viejos(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import castkit.control1 as mod_c1
+
+    carpeta = _preparar_diseno_limpio(tmp_path, monkeypatch, alto_mm=60.0)
+    # Renders de una corrida anterior que no deben confundirse con los nuevos.
+    primera = ejecutar_control1(carpeta, sin_blender=True)
+    marcas_previas = {r: r.stat().st_mtime_ns for r in primera["renders"]}
+
+    monkeypatch.setattr(mod_c1, "find_blender", lambda: Path("/usr/bin/blender"))
+    # Blender "termina bien" pero el script falló antes de escribir los PNG.
+    monkeypatch.setattr(mod_c1, "run_blender_script", lambda script, *args: None)
+
+    resultado = ejecutar_control1(carpeta, sin_blender=False)
+    assert resultado["metodo"] == "matplotlib"
+    for ruta in resultado["renders"]:
+        assert ruta.is_file()
+        assert ruta.stat().st_mtime_ns != marcas_previas[ruta]
+        with Image.open(ruta) as img:
+            assert "Alto: 60.0 mm" in img.info.get("castkit_medidas", "")
+
+
 def test_control1_invoca_blender_headless_cuando_esta_disponible(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

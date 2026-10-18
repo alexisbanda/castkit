@@ -57,6 +57,8 @@ def run_blender_script(
         str(blender),
         "--background",
         "--factory-startup",
+        "--python-exit-code",
+        "1",
         "--python",
         str(script),
         "--",

@@ -321,6 +321,10 @@ def ejecutar_control1(
         rutas_vistas[vista] = carpeta_output / nombre_png
         nombres_renders.append(nombre_png)
 
+    # Borramos renders previos para no confundirlos con los de esta corrida.
+    for ruta_png in rutas_vistas.values():
+        ruta_png.unlink(missing_ok=True)
+
     metodo = "matplotlib"
     if not sin_blender:
         try:
@@ -333,6 +337,9 @@ def ejecutar_control1(
                 str(rutas_vistas["arriba"]),
                 str(rutas_vistas["3-4"]),
             )
+            faltantes = [str(r) for r in rutas_vistas.values() if not r.is_file()]
+            if faltantes:
+                raise RuntimeError(f"Blender no generó los renders: {', '.join(faltantes)}")
             metodo = "blender"
         except (BlenderNotFoundError, RuntimeError):
             _renderizar_con_matplotlib(malla, rutas_vistas)
