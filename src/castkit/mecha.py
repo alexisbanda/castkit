@@ -8,7 +8,10 @@ central `(centro_x, centro_y)` de la malla limpia en `work/`, verificando que:
   `espesor_minimo_pared_mm` sin confirmación explícita del operador.
 
 Si el material del diseño es `porcelana-fria` o `silicona`, este paso no
-modifica la malla limpia.
+modifica la malla limpia. Lo mismo si el tipo de molde de la versión actual es
+`abierto` (ticket #55): el canal de mecha solo tiene sentido en un molde
+`completo`, así que no se perfora nada (y se avisa del motivo), sea cual sea
+el material.
 """
 
 from __future__ import annotations
@@ -26,6 +29,7 @@ import trimesh
 from castkit.versiones import (
     VersionError,
     cargar_diseno,
+    datos_version,
     nombre_archivo,
     registrar_parametros,
 )
@@ -126,6 +130,7 @@ def aplicar_canal_mecha(
     nombre_diseno = datos["nombre"]
     version_actual = datos["version_actual"]
     material = datos["material"]
+    tipo_molde = datos_version(datos, version_actual)["tipo_molde"]
 
     ruta_limpia = carpeta / "work" / nombre_archivo(nombre_diseno, version_actual, "limpia", "stl")
     if not ruta_limpia.is_file():
@@ -133,6 +138,26 @@ def aplicar_canal_mecha(
             f"La versión v{version_actual} de «{nombre_diseno}» no tiene malla limpia en "
             f'"{ruta_limpia}": ejecuta primero "castkit limpieza".'
         )
+
+    if tipo_molde == "abierto":
+        motivo = "el canal de mecha solo se hace en molde completo; este diseño es molde abierto."
+        registrar_parametros(
+            carpeta,
+            "mecha",
+            {
+                "aplicado": False,
+                "material": material,
+                "tipo_molde": tipo_molde,
+                "motivo": motivo,
+            },
+        )
+        return {
+            "aplicado": False,
+            "material": material,
+            "tipo_molde": tipo_molde,
+            "motivo": motivo,
+            "destino": ruta_limpia,
+        }
 
     if material != "cera":
         registrar_parametros(

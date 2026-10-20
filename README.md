@@ -54,9 +54,25 @@ Si no encuentra ninguno, lanza un error explicando cómo instalar Blender LTS (l
 `castkit alta` crea la carpeta estándar de un diseño nuevo a partir de su brief:
 
 ```bash
+# Molde abierto (el habitual: la figura tumbada, cortada por un plano, con la
+# espalda plana sobre la placa; ver «Limpiar y escalar la malla automáticamente»)
 uv run castkit alta guagua-pan \
   --brief ~/Descargas/brief-guagua \
   --material porcelana-fria \
+  --tipo-molde abierto \
+  --largo-mm 100 \
+  --grosor-mm 20 \
+  --cavidades 4 \
+  --cantidad 48 \
+  --fecha 2026-11-01 \
+  --licencia propio \
+  --origen "escultura propia en Nomad"
+
+# Molde completo (la figura de pie, entera; para moldes de dos partes, fuera de alcance hoy)
+uv run castkit alta guagua-pan-completa \
+  --brief ~/Descargas/brief-guagua \
+  --material porcelana-fria \
+  --tipo-molde completo \
   --alto-mm 80 \
   --cavidades 4 \
   --cantidad 48 \
@@ -72,6 +88,29 @@ Esto crea `guagua-pan/` con:
 - `CHANGELOG.md`: historial del diseño; la primera entrada registra la creación de la v1.
 - `diseno.json`: metadatos del diseño y de cada versión (lo usará el alta de nuevas versiones).
 
+### Tipo de molde (`--tipo-molde`)
+
+Cada diseño tiene un tipo de molde, guardado en su versión:
+
+- **`abierto`** (el habitual en el taller: guaguas, apliques, medallas): una sola pieza, con la
+  figura tumbada y cortada por un plano horizontal, dejando la espalda plana sobre la placa.
+  Pide `--largo-mm` (obligatorio: la medida mayor de la figura vista en planta) y acepta
+  `--grosor-mm` (opcional: lo que la figura sobresale de la placa; sin indicarlo, se usa la
+  mitad del grosor total de la figura escalada). No se usa `--alto-mm`.
+- **`completo`**: la figura entera, de pie, como se comportaba castkit antes del ticket #55.
+  Pide `--alto-mm` (obligatorio). No se usan `--largo-mm` ni `--grosor-mm`.
+
+El tipo efectivo se deduce así, en este orden: si se pasa `--tipo-molde`, se usa ese; si no, pero
+se pasó `--largo-mm` o `--grosor-mm`, es `abierto`; si no, pero se pasó `--alto-mm`, es
+`completo`; si no se pasó ninguna de las tres, en una terminal interactiva se pregunta el tipo
+(proponiendo `abierto` por defecto) y luego la medida que corresponda; sin terminal, se asume
+`abierto` y, si falta `--largo-mm`, aparece en la lista de opciones obligatorias faltantes.
+Combinar `--tipo-molde completo` con `--largo-mm`/`--grosor-mm`, o `--tipo-molde abierto` con
+`--alto-mm`, se rechaza con un mensaje que explica qué medidas lleva cada tipo.
+
+Un diseño dado de alta antes de este ticket (sin `tipo_molde` en su `diseno.json`) se trata
+siempre como `completo` y se comporta exactamente igual que antes.
+
 ### Opciones
 
 | Opción | Obligatoria | Valores aceptados |
@@ -79,7 +118,10 @@ Esto crea `guagua-pan/` con:
 | `nombre` (posicional) | sí | minúsculas, números y guiones, sin tildes ni espacios (p. ej. `guagua-pan`) |
 | `--brief` | sí | carpeta existente y no vacía |
 | `--material` | sí | `porcelana-fria`, `silicona`, `cera` |
-| `--alto-mm` | sí | número mayor que 0 |
+| `--tipo-molde` | no | `abierto`, `completo` (ver más arriba cómo se deduce si se omite) |
+| `--alto-mm` | sí en molde `completo` | número mayor que 0 |
+| `--largo-mm` | sí en molde `abierto` | número mayor que 0: medida mayor de la figura en planta |
+| `--grosor-mm` | no (solo molde `abierto`) | número mayor que 0: lo que sobresale de la placa |
 | `--cavidades` | sí | entero mayor o igual a 1 |
 | `--cantidad` | sí | entero mayor o igual a 1 |
 | `--fecha` | sí | fecha de entrega, formato `AAAA-MM-DD` |
@@ -89,9 +131,9 @@ Esto crea `guagua-pan/` con:
 Si el nombre no cumple el formato (mayúsculas, espacios, tildes, etc.), el alta se rechaza y
 propone un nombre corregido; por ejemplo, «Guagua de Pan» se corrige a `guagua-de-pan`.
 
-Si falta alguna opción obligatoria y la terminal es interactiva, `castkit` la pregunta; si no
-es interactiva, el alta falla y lista todas las opciones que faltan. Si el diseño ya existe, no
-se modifica nada y se avisa del conflicto.
+Si falta alguna opción obligatoria (incluida la medida que corresponda al tipo de molde) y la
+terminal es interactiva, `castkit` la pregunta; si no es interactiva, el alta falla y lista todas
+las opciones que faltan. Si el diseño ya existe, no se modifica nada y se avisa del conflicto.
 
 ### Dónde se crea el diseño
 
@@ -106,19 +148,31 @@ uv run castkit alta guagua-pan --brief ... # se crea en /datos/disenos/guagua-pa
 ## Crear una nueva versión de un diseño
 
 `castkit version` crea la siguiente versión de un diseño ya existente, a partir de la versión
-actual: parte de sus parámetros, hereda el alto y las cavidades salvo que indiques nuevos valores,
-y deja constancia del cambio en `CHANGELOG.md`. La versión anterior no se modifica.
+actual: parte de sus parámetros, hereda el tipo de molde, el alto/largo/grosor y las cavidades
+salvo que indiques nuevos valores, y deja constancia del cambio en `CHANGELOG.md`. La versión
+anterior no se modifica.
 
 ```bash
 uv run castkit version guagua-pan --motivo "aumentar altura a 90 mm" --alto-mm 90
+
+# Cambiar a molde abierto en la nueva versión (las mismas reglas que castkit alta)
+uv run castkit version guagua-pan --motivo "pasar a molde abierto" --tipo-molde abierto --largo-mm 100
 ```
 
 Esto, si `guagua-pan` está en `v1`, deja `version_actual: 2` en `diseno.json` y añade a
-`versiones` una entrada `v2` con la fecha de creación, el motivo, el alto y las cavidades
-efectivos (el valor indicado por opción, o el de la versión anterior si no se indicó) y una copia
-independiente de los parámetros de `v1` (modificarlos en `v2` no afecta a `v1`). También agrega a
-`CHANGELOG.md` una entrada `## v2 — AAAA-MM-DD` con el motivo y, si cambiaron, los valores de alto
-o cavidades. No se toca `brief/`, `input/`, `work/`, `output/` ni ninguna versión anterior.
+`versiones` una entrada `v2` con la fecha de creación, el motivo, el tipo de molde, el
+alto/largo/grosor y las cavidades efectivos (el valor indicado por opción, o el de la versión
+anterior si no se indicó) y una copia independiente de los parámetros de `v1` (modificarlos en
+`v2` no afecta a `v1`). También agrega a `CHANGELOG.md` una entrada `## v2 — AAAA-MM-DD` con el
+motivo y, si cambiaron, el tipo de molde y los valores de alto, largo, grosor o cavidades. No se
+toca `brief/`, `input/`, `work/`, `output/` ni ninguna versión anterior.
+
+El tipo de molde efectivo de la nueva versión se deduce con las mismas reglas que
+`castkit alta` (ver «Tipo de molde» más arriba): si no se pasa `--tipo-molde` ni ninguna medida,
+se hereda el tipo de la versión actual; si se pasa `--largo-mm`/`--grosor-mm` sin `--tipo-molde`,
+la nueva versión pasa a `abierto`; si se pasa `--alto-mm` sin `--tipo-molde`, pasa a `completo`.
+Cambiar de tipo sin indicar la medida que ese tipo necesita (y que la versión anterior no tuviera)
+se rechaza.
 
 ### Opciones
 
@@ -126,14 +180,18 @@ o cavidades. No se toca `brief/`, `input/`, `work/`, `output/` ni ninguna versi�
 | --- | --- | --- |
 | `nombre` (posicional) | sí | nombre de un diseño ya dado de alta |
 | `--motivo` | sí | texto libre: qué cambió en esta versión |
+| `--tipo-molde` | no | `abierto`, `completo` (si se omite, se hereda o se deduce de la medida dada) |
 | `--alto-mm` | no | número mayor que 0 (si se omite, se copia el de la versión actual) |
+| `--largo-mm` | no | número mayor que 0 (si se omite, se copia el de la versión actual) |
+| `--grosor-mm` | no | número mayor que 0 (si se omite, se copia el de la versión actual) |
 | `--cavidades` | no | entero mayor o igual a 1 (si se omite, se copia el de la versión actual) |
 
-Un `--alto-mm` o `--cavidades` inválido se rechaza con el mismo mensaje que usa `castkit alta`, y
-no modifica ni `diseno.json` ni `CHANGELOG.md`. Si falta `--motivo` y la terminal es interactiva,
-`castkit` lo pregunta; si no es interactiva, falla pidiendo la opción. Un motivo vacío o de solo
-espacios nunca crea la versión. Si el diseño no existe (o el nombre no es válido), se avisa del
-error y no se pregunta nada.
+Un `--alto-mm`, `--largo-mm`, `--grosor-mm` o `--cavidades` inválido, o una combinación de
+`--tipo-molde` con las medidas del otro tipo, se rechaza con el mismo mensaje que usa
+`castkit alta`, y no modifica ni `diseno.json` ni `CHANGELOG.md`. Si falta `--motivo` y la
+terminal es interactiva, `castkit` lo pregunta; si no es interactiva, falla pidiendo la opción.
+Un motivo vacío o de solo espacios nunca crea la versión. Si el diseño no existe (o el nombre no
+es válido), se avisa del error y no se pregunta nada.
 
 ### Regla para las etapas del pipeline
 
@@ -196,24 +254,38 @@ Esto, si `guagua-pan` está en `v1`:
 
 1. Busca la malla en bruto más reciente (la de `v1`; si no la tiene, la de la versión anterior
    más reciente que sí la tenga, avisando en pantalla de cuál se usó).
-2. La orienta según `--arriba` (qué eje debe quedar hacia +Z antes de escalar).
-3. La escala de forma uniforme (conservando las proporciones) para que su altura sea
-   `alto_mm + corte_base_mm`.
+2. La orienta según `--arriba` (qué eje debe quedar hacia +Z antes de escalar). Si se omite
+   `--arriba` (su valor por defecto es «auto»): en molde `completo` equivale a `z` (como
+   siempre); en molde `abierto` se elige automáticamente, de la malla en bruto, el eje de menor
+   extensión (el grosor de la figura), con signo positivo, para tumbarla con esa cara hacia +Z.
+   Un `--arriba` explícito manda siempre sobre la elección automática, en ambos tipos de molde
+   (por ejemplo, para darle la vuelta a la figura con `--arriba -y`).
+3. La escala de forma uniforme (conservando las proporciones): en molde `completo`, para que su
+   altura sea `alto_mm + corte_base_mm`; en molde `abierto`, para que su mayor extensión
+   horizontal (X o Y, tras orientarla) sea `largo_mm`.
 4. Cierra sus zonas abiertas (huecos), siempre que ninguna supere `agujero_max_mm` de
    perímetro; si alguna lo supera, no cierra nada y falla indicando cuántas zonas hay, su
    posición y tamaño aproximados (en mm) y los siguientes pasos posibles.
-5. Recorta `corte_base_mm` desde la base (dejando la malla cerrada) y la traslada para que la
-   base quede exactamente en z = 0.
+5. Recorta la malla con un plano horizontal y la traslada para que el plano de corte quede
+   exactamente en z = 0, conservando la parte de arriba (la espalda del molde queda plana). En
+   molde `completo` el plano está `corte_base_mm` por encima de la base (como siempre;
+   `corte_base_mm` no se usa en molde abierto). En molde `abierto`, con `--grosor-mm` el plano
+   deja `grosor_mm` mm por encima (`z_max - grosor_mm`); sin `--grosor-mm`, el plano queda en la
+   mitad del grosor total de la figura escalada. Un `--grosor-mm` mayor o igual al grosor total
+   disponible se rechaza con un mensaje que indica ese grosor total.
 6. La simplifica a `caras_max` caras como máximo (si ya tiene menos, no la toca).
 7. Arregla las normales y comprueba que el resultado esté cerrado y tenga volumen positivo.
-8. Mide la distancia máxima contra la malla original (orientada, escalada y recortada); si
-   supera `tolerancia_mm`, rechaza el resultado sin escribir ningún archivo.
+8. Mide la distancia máxima contra la malla original (orientada, escalada y recortada por el
+   mismo plano); si supera `tolerancia_mm`, rechaza el resultado sin escribir ningún archivo.
 
 Si todo sale bien, escribe `guagua-pan/work/guagua-pan_v1_limpia.stl` (nombre generado con
 `nombre_archivo`) y registra, con `registrar_parametros` en `versiones.v1.parametros.limpieza`:
-`caras_max`, `tolerancia_mm`, `corte_base_mm`, `agujero_max_mm`, `arriba`, la versión de la que
-salió la malla en bruto (`version_bruto`), su huella `sha256`, las caras resultantes (`caras`) y
-la distancia máxima medida (`distancia_max_mm`). Volver a limpiar la misma versión reemplaza el
+`caras_max`, `tolerancia_mm`, `corte_base_mm` (`0` en molde abierto: no se aplica), `agujero_max_mm`,
+`arriba` (el eje efectivamente usado), `arriba_automatico` (si se eligió automáticamente),
+`tipo_molde`, `largo_mm` y `grosor_mm` (el efectivo; `None` en molde completo),
+`plano_corte_mm` (la altura del plano de corte antes de trasladarlo), la versión de la que salió
+la malla en bruto (`version_bruto`), su huella `sha256`, las caras resultantes (`caras`) y la
+distancia máxima medida (`distancia_max_mm`). Volver a limpiar la misma versión reemplaza el
 archivo y el registro, avisando en pantalla.
 
 ### Respaldo con Blender (remallado por vóxeles)
@@ -237,7 +309,7 @@ explica la distancia medida (ver #28).
 | Opción | Obligatoria | Valores aceptados |
 | --- | --- | --- |
 | `nombre` (posicional) | sí | nombre de un diseño ya dado de alta |
-| `--arriba` | no | `x`, `-x`, `y`, `-y`, `z` (por defecto), `-z`: eje que debe quedar hacia +Z |
+| `--arriba` | no | `x`, `-x`, `y`, `-y`, `z`, `-z`: eje que debe quedar hacia +Z (por defecto, «auto»: `z` en molde completo, o el eje de menor extensión en molde abierto) |
 | `--caras-max` | no | entero mayor o igual a 1 (si se omite, se usa `config/fabricacion.toml`) |
 | `--tolerancia-mm` | no | número mayor que 0 (si se omite, se usa `config/fabricacion.toml`) |
 | `--corte-base-mm` | no | número mayor que 0 (si se omite, se usa `config/fabricacion.toml`) |
@@ -277,7 +349,11 @@ uv run castkit mecha guagua-pan
 ```
 
 Si el material del diseño es `porcelana-fria` o `silicona`, este paso no modifica la malla
-limpia (solo registra que no se aplicó, junto con el material). Si es `cera`:
+limpia (solo registra que no se aplicó, junto con el material). Lo mismo si el tipo de molde de
+la versión actual es `abierto`: el canal de mecha solo tiene sentido en un molde `completo`, así
+que `castkit mecha` no perfora nada (avisa en pantalla del motivo y registra `aplicado: false`
+con el `tipo_molde` y el `motivo`), sea cual sea el material; termina con código 0. Si el tipo de
+molde es `completo` y el material es `cera`:
 
 1. Calcula el espesor mínimo de pared lateral que quedaría entre el canal y el exterior de la
    figura.
@@ -438,11 +514,14 @@ copia el `.stl` a otro nombre antes de generar el segundo modo.
 
 Junto al `.stl`, `castkit matriz` escribe `output/<diseño>_v<actual>_ficha.md`: una ficha técnica
 en Markdown con el material final de la figura, el modo de matriz impresa, las cavidades en la
-matriz, la altura objetivo de la figura, las dimensiones exteriores de la matriz, el volumen por
+matriz, el tipo de molde y sus medidas, las dimensiones exteriores de la matriz, el volumen por
 figura en cm³, (en modo `cubeta`) la silicona líquida estimada en ml, el nombre del archivo `.stl`
 y una advertencia de taller según el material (por ejemplo, verificar que el canal de mecha quede
 despejado antes de verter la silicona en figuras de cera, o aplicar desmoldante obligatoriamente
-en moldes de silicona sobre silicona).
+en moldes de silicona sobre silicona). En molde `completo` muestra «Tipo de molde: completo» y
+«Altura objetivo de figura: … mm»; en molde `abierto`, «Tipo de molde: abierto», «Largo de la
+figura: … mm» y «Grosor de la figura: … mm». Los modos `figura` y `cubeta` funcionan igual con
+un diseño de cualquiera de los dos tipos de molde.
 
 ### Opciones de `castkit matriz`
 

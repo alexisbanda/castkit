@@ -287,12 +287,24 @@ def generar_matriz(
         if volumen_silicona_ml is not None
         else ""
     )
+    tipo_molde = info_version["tipo_molde"]
+    if tipo_molde == "abierto":
+        linea_tipo_y_medidas = (
+            f"- **Tipo de molde:** `abierto`\n"
+            f"- **Largo de la figura:** {info_version['largo_mm']} mm\n"
+            f"- **Grosor de la figura:** {info_version['grosor_mm']} mm\n"
+        )
+    else:
+        linea_tipo_y_medidas = (
+            f"- **Tipo de molde:** `completo`\n"
+            f"- **Altura objetivo de figura:** {info_version['alto_mm']} mm\n"
+        )
     contenido_ficha = (
         f"# Ficha técnica: {nombre_diseno} (v{version_actual})\n\n"
         f"- **Material final de la figura:** `{material}`\n"
         f"- **Modo de matriz impresa:** `{modo}`\n"
         f"- **Cavidades en la matriz:** {cavidades_en_matriz}\n"
-        f"- **Altura objetivo de figura:** {info_version['alto_mm']} mm\n"
+        f"{linea_tipo_y_medidas}"
         f"- **Dimensiones exteriores de la matriz:** "
         f"{dimensiones_mm['ancho_mm']} × {dimensiones_mm['fondo_mm']} × "
         f"{dimensiones_mm['alto_total_mm']} mm\n"

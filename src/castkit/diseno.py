@@ -22,6 +22,7 @@ from pathlib import Path
 
 MATERIALES = ("porcelana-fria", "silicona", "cera")
 LICENCIAS = ("propio", "comercial")
+TIPOS_MOLDE = ("abierto", "completo")
 
 _PATRON_NOMBRE_VALIDO = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
@@ -103,12 +104,15 @@ class DatosAlta:
     nombre: str
     brief: Path
     material: str
-    alto_mm: float
+    alto_mm: float | None
     cavidades: int
     cantidad: int
     fecha: date
     licencia: str
     origen: str
+    tipo_molde: str = "completo"
+    largo_mm: float | None = None
+    grosor_mm: float | None = None
 
     def __post_init__(self) -> None:
         validar_nombre(self.nombre)
@@ -125,10 +129,50 @@ class DatosAlta:
                 f'recibido "{self.licencia}".'
             )
 
-        if isinstance(self.alto_mm, bool) or not isinstance(self.alto_mm, (int, float)):
-            raise AltaError(f'--alto-mm debe ser un número mayor que 0; recibido "{self.alto_mm}".')
-        if not math.isfinite(self.alto_mm) or self.alto_mm <= 0:
-            raise AltaError(f'--alto-mm debe ser un número mayor que 0; recibido "{self.alto_mm}".')
+        if self.tipo_molde not in TIPOS_MOLDE:
+            raise AltaError(
+                f"--tipo-molde debe ser uno de los siguientes: {', '.join(TIPOS_MOLDE)}; "
+                f'recibido "{self.tipo_molde}".'
+            )
+
+        if self.tipo_molde == "completo":
+            if self.largo_mm is not None or self.grosor_mm is not None:
+                raise AltaError(
+                    "--largo-mm y --grosor-mm son medidas de molde abierto; en molde completo "
+                    "solo se usa --alto-mm."
+                )
+            if isinstance(self.alto_mm, bool) or not isinstance(self.alto_mm, (int, float)):
+                raise AltaError(
+                    f'--alto-mm debe ser un número mayor que 0; recibido "{self.alto_mm}".'
+                )
+            if not math.isfinite(self.alto_mm) or self.alto_mm <= 0:
+                raise AltaError(
+                    f'--alto-mm debe ser un número mayor que 0; recibido "{self.alto_mm}".'
+                )
+        else:  # abierto
+            if self.alto_mm is not None:
+                raise AltaError(
+                    "--alto-mm es la medida de molde completo; en molde abierto se usan "
+                    "--largo-mm (obligatorio, la medida mayor en planta) y --grosor-mm "
+                    "(opcional, lo que sobresale de la placa)."
+                )
+            if isinstance(self.largo_mm, bool) or not isinstance(self.largo_mm, (int, float)):
+                raise AltaError(
+                    f'--largo-mm debe ser un número mayor que 0; recibido "{self.largo_mm}".'
+                )
+            if not math.isfinite(self.largo_mm) or self.largo_mm <= 0:
+                raise AltaError(
+                    f'--largo-mm debe ser un número mayor que 0; recibido "{self.largo_mm}".'
+                )
+            if self.grosor_mm is not None:
+                if isinstance(self.grosor_mm, bool) or not isinstance(self.grosor_mm, (int, float)):
+                    raise AltaError(
+                        f'--grosor-mm debe ser un número mayor que 0; recibido "{self.grosor_mm}".'
+                    )
+                if not math.isfinite(self.grosor_mm) or self.grosor_mm <= 0:
+                    raise AltaError(
+                        f'--grosor-mm debe ser un número mayor que 0; recibido "{self.grosor_mm}".'
+                    )
 
         if isinstance(self.cavidades, bool) or not isinstance(self.cavidades, int):
             raise AltaError(
@@ -204,7 +248,11 @@ def crear_diseno(datos: DatosAlta, destino: Path | None = None) -> Path:
             "nombre": datos.nombre,
             "version_actual": 1,
             "material": datos.material,
-            "medidas": {"alto_mm": datos.alto_mm},
+            "medidas": {
+                "alto_mm": datos.alto_mm,
+                "largo_mm": datos.largo_mm,
+                "grosor_mm": datos.grosor_mm,
+            },
             "cavidades": datos.cavidades,
             "cantidad": datos.cantidad,
             "fecha_entrega": datos.fecha.isoformat(),
@@ -213,7 +261,10 @@ def crear_diseno(datos: DatosAlta, destino: Path | None = None) -> Path:
             "versiones": {
                 "v1": {
                     "creada": ahora,
+                    "tipo_molde": datos.tipo_molde,
                     "alto_mm": datos.alto_mm,
+                    "largo_mm": datos.largo_mm,
+                    "grosor_mm": datos.grosor_mm,
                     "cavidades": datos.cavidades,
                     "parametros": {},
                 }
