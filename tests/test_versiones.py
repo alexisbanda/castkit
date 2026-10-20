@@ -476,7 +476,18 @@ def test_guardar_diseno_es_atomico_ante_un_fallo(
 def test_datos_version_en_diseno_nuevo_usa_los_datos_de_la_version(diseno_v1: Path) -> None:
     datos = cargar_diseno(diseno_v1)
     resultado = datos_version(datos)
-    assert resultado == {"version": 1, "alto_mm": 80, "cavidades": 4, "parametros": {}}
+    # Desde el ticket #55, `datos_version` también devuelve `tipo_molde`,
+    # `largo_mm` y `grosor_mm` (este diseño es de molde `completo`, así que
+    # `largo_mm`/`grosor_mm` quedan en `None`).
+    assert resultado == {
+        "version": 1,
+        "tipo_molde": "completo",
+        "alto_mm": 80,
+        "largo_mm": None,
+        "grosor_mm": None,
+        "cavidades": 4,
+        "parametros": {},
+    }
 
 
 def test_datos_version_en_diseno_antiguo_usa_el_respaldo_de_nivel_superior(

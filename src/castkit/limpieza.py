@@ -225,6 +225,36 @@ def _escalar_uniforme(malla: trimesh.Trimesh, alto_mm: float, corte_base_mm: flo
     return factor
 
 
+def _escalar_uniforme_largo(malla: trimesh.Trimesh, largo_mm: float) -> float:
+    """Escala ``malla`` (en el sitio, molde abierto) para que su mayor extensión horizontal
+    (X o Y, tras orientarla) sea ``largo_mm``.
+
+    Devuelve el factor de escala aplicado. El escalado es uniforme: se
+    conservan las proporciones ancho/fondo/grosor.
+    """
+    extents = malla.bounds[1] - malla.bounds[0]
+    extension_horizontal = float(max(extents[0], extents[1]))
+    if not np.isfinite(extension_horizontal) or extension_horizontal <= 0:
+        raise LimpiezaError("La malla no tiene extensión horizontal (en X/Y): no se puede escalar.")
+
+    factor = largo_mm / extension_horizontal
+    malla.apply_scale(factor)
+    return factor
+
+
+def _detectar_eje_vertical_automatico(malla: trimesh.Trimesh) -> str:
+    """Elige, para molde abierto sin ``--arriba`` explícito, el eje de ``malla`` en bruto con
+    menor extensión (el grosor de la figura) para ponerlo hacia +Z.
+
+    Devuelve siempre un signo positivo (``"x"``, ``"y"`` o ``"z"``): elegir hacia qué lado
+    queda "arriba" la cara bonita queda fuera de alcance (ver ticket #55) y se corrige, si
+    hace falta, con ``--arriba`` explícito.
+    """
+    extents = malla.bounds[1] - malla.bounds[0]
+    indice = int(np.argmin(extents))
+    return ("x", "y", "z")[indice]
+
+
 def _recortar_base(malla: trimesh.Trimesh, plano_z: float) -> trimesh.Trimesh:
     """Recorta ``malla`` por el plano horizontal ``z = plano_z`` y la traslada a z = 0.
 
@@ -352,7 +382,7 @@ def _remallar_con_blender(malla: trimesh.Trimesh, voxel_mm: float) -> trimesh.Tr
 def limpiar_malla(
     carpeta: Path,
     *,
-    arriba: str = "z",
+    arriba: str | None = None,
     caras_max: int,
     tolerancia_mm: float,
     corte_base_mm: float,
@@ -365,27 +395,63 @@ def limpiar_malla(
     Ver el resumen de pasos en el docstring del módulo. Si el cierre rápido en
     Python no consigue cerrar la malla y ``sin_blender`` es ``False``, intenta
     cerrarla con el remallado por vóxeles de Blender (`voxel_mm`).
+
+    Si ``arriba`` es ``None`` (por defecto), la orientación se elige
+    automáticamente según el tipo de molde de la versión actual: en molde
+    ``completo`` equivale a ``"z"`` (como siempre); en molde ``abierto`` se
+    elige el eje de menor extensión de la malla en bruto (el grosor de la
+    figura), con signo positivo, para tumbarla con esa cara hacia +Z (ver
+    :func:`_detectar_eje_vertical_automatico`). Si se pasa ``arriba``
+    explícito, manda sobre la elección automática en ambos tipos de molde.
     """
     from castkit.blender import BlenderNotFoundError, find_blender
 
     carpeta = Path(carpeta)
-    arriba = validar_arriba(arriba)
+    if arriba is not None:
+        arriba = validar_arriba(arriba)
 
     datos = cargar_diseno(carpeta)
     info_version = datos_version(datos)
-    alto_mm = info_version["alto_mm"]
-    if alto_mm is None:
-        raise LimpiezaError(
-            "La versión actual no tiene un alto_mm definido: no se puede escalar la malla."
-        )
+    tipo_molde = info_version["tipo_molde"]
 
     ruta_bruto, version_bruto = _localizar_malla_bruto(carpeta, datos)
     sha_entrada = sha256_archivo(ruta_bruto)
 
     malla = trimesh.load(ruta_bruto, file_type="stl", force="mesh")
 
-    malla.apply_transform(_transformacion_arriba(arriba))
-    _escalar_uniforme(malla, alto_mm, corte_base_mm)
+    arriba_automatico = False
+    if arriba is not None:
+        arriba_efectivo = arriba
+    elif tipo_molde == "completo":
+        arriba_efectivo = "z"
+    else:
+        arriba_efectivo = _detectar_eje_vertical_automatico(malla)
+        arriba_automatico = True
+
+    malla.apply_transform(_transformacion_arriba(arriba_efectivo))
+
+    largo_mm: float | None = None
+    grosor_mm_pedido: float | None = None
+    if tipo_molde == "completo":
+        alto_mm = info_version["alto_mm"]
+        if alto_mm is None:
+            raise LimpiezaError(
+                "La versión actual no tiene un alto_mm definido: no se puede escalar la malla."
+            )
+        _escalar_uniforme(malla, alto_mm, corte_base_mm)
+        corte_base_efectivo = corte_base_mm
+    else:
+        largo_mm = info_version["largo_mm"]
+        if largo_mm is None:
+            raise LimpiezaError(
+                "La versión actual no tiene un largo_mm definido: no se puede escalar la malla."
+            )
+        grosor_mm_pedido = info_version["grosor_mm"]
+        _escalar_uniforme_largo(malla, largo_mm)
+        # corte_base_mm no se aplica en molde abierto: el corte lo decide
+        # grosor_mm (ver más abajo), no un recorte fijo desde la base.
+        corte_base_efectivo = 0.0
+
     malla_escalada_original = malla.copy()
 
     metodo = "python"
@@ -449,7 +515,25 @@ def limpiar_malla(
                 "nueva."
             )
 
-    plano_z = float(malla.bounds[0][2]) + corte_base_mm
+    if tipo_molde == "completo":
+        plano_z = float(malla.bounds[0][2]) + corte_base_efectivo
+        grosor_mm_efectivo: float | None = None
+    else:
+        z_min = float(malla.bounds[0][2])
+        z_max = float(malla.bounds[1][2])
+        grosor_total = z_max - z_min
+        if grosor_mm_pedido is not None:
+            if grosor_mm_pedido >= grosor_total:
+                raise LimpiezaError(
+                    f"--grosor-mm ({grosor_mm_pedido} mm) debe ser menor que el grosor total "
+                    f"disponible de la figura escalada ({grosor_total:.3f} mm)."
+                )
+            grosor_mm_efectivo = grosor_mm_pedido
+            plano_z = z_max - grosor_mm_efectivo
+        else:
+            grosor_mm_efectivo = grosor_total / 2.0
+            plano_z = z_min + grosor_mm_efectivo
+
     zonas_excluidas = [
         {"centro": hueco["centro"] - np.array([0.0, 0.0, plano_z]), "radio": hueco["radio"]}
         for hueco in huecos_cerrados
@@ -503,9 +587,14 @@ def limpiar_malla(
         "metodo": metodo,
         "caras_max": caras_max,
         "tolerancia_mm": tolerancia_mm,
-        "corte_base_mm": corte_base_mm,
+        "corte_base_mm": corte_base_efectivo,
         "agujero_max_mm": agujero_max_mm,
-        "arriba": arriba,
+        "arriba": arriba_efectivo,
+        "arriba_automatico": arriba_automatico,
+        "tipo_molde": tipo_molde,
+        "largo_mm": largo_mm,
+        "grosor_mm": grosor_mm_efectivo,
+        "plano_corte_mm": plano_z,
         "version_bruto": version_bruto,
         "sha256": sha_entrada,
         "caras": len(malla_limpia.faces),

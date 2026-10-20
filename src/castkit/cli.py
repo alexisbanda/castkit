@@ -24,6 +24,7 @@ from castkit.control1 import (
 from castkit.diseno import (
     LICENCIAS,
     MATERIALES,
+    TIPOS_MOLDE,
     AltaError,
     DatosAlta,
     carpeta_disenos,
@@ -43,13 +44,37 @@ from castkit.versiones import (
     ubicar_diseno,
 )
 
-# Orden en el que se piden/validan las opciones del subcomando `alta`.
-_OPCIONES = ("brief", "material", "alto_mm", "cavidades", "cantidad", "fecha", "licencia", "origen")
+# Orden en el que se piden/validan las opciones del subcomando `alta`, según el
+# tipo de molde efectivo: la medida de alto (molde completo) o de largo (molde
+# abierto) ocupa el mismo lugar que `alto_mm` ocupaba antes del ticket #55.
+_OPCIONES_POR_TIPO_MOLDE = {
+    "completo": (
+        "brief",
+        "material",
+        "alto_mm",
+        "cavidades",
+        "cantidad",
+        "fecha",
+        "licencia",
+        "origen",
+    ),
+    "abierto": (
+        "brief",
+        "material",
+        "largo_mm",
+        "cavidades",
+        "cantidad",
+        "fecha",
+        "licencia",
+        "origen",
+    ),
+}
 
 _NOMBRES_OPCION = {
     "brief": "--brief",
     "material": "--material",
     "alto_mm": "--alto-mm",
+    "largo_mm": "--largo-mm",
     "cavidades": "--cavidades",
     "cantidad": "--cantidad",
     "fecha": "--fecha",
@@ -61,6 +86,7 @@ _PREGUNTAS = {
     "brief": "Carpeta del brief: ",
     "material": f"Material ({', '.join(MATERIALES)}): ",
     "alto_mm": "Alto en mm: ",
+    "largo_mm": "Largo en mm (medida mayor de la figura en planta): ",
     "cavidades": "Número de cavidades: ",
     "cantidad": "Cantidad a producir: ",
     "fecha": "Fecha de entrega (AAAA-MM-DD): ",
@@ -86,7 +112,31 @@ def _construir_parser() -> argparse.ArgumentParser:
     alta.add_argument("nombre", help="Nombre del diseño (minúsculas, números y guiones).")
     alta.add_argument("--brief", default=None, help="Carpeta con el brief del diseño.")
     alta.add_argument("--material", default=None, help=f"Material: {', '.join(MATERIALES)}.")
-    alta.add_argument("--alto-mm", dest="alto_mm", default=None, help="Alto en milímetros.")
+    alta.add_argument(
+        "--tipo-molde",
+        dest="tipo_molde",
+        default=None,
+        help=f"Tipo de molde: {', '.join(TIPOS_MOLDE)} (por defecto «abierto» si no se indica "
+        "ninguna medida).",
+    )
+    alta.add_argument(
+        "--alto-mm",
+        dest="alto_mm",
+        default=None,
+        help="Alto en milímetros (molde completo).",
+    )
+    alta.add_argument(
+        "--largo-mm",
+        dest="largo_mm",
+        default=None,
+        help="Largo en milímetros, la medida mayor de la figura en planta (molde abierto).",
+    )
+    alta.add_argument(
+        "--grosor-mm",
+        dest="grosor_mm",
+        default=None,
+        help="Grosor en milímetros que sobresale de la placa (molde abierto, opcional).",
+    )
     alta.add_argument("--cavidades", default=None, help="Número de cavidades del molde.")
     alta.add_argument("--cantidad", default=None, help="Cantidad de piezas a producir.")
     alta.add_argument("--fecha", default=None, help="Fecha de entrega, en formato AAAA-MM-DD.")
@@ -101,7 +151,28 @@ def _construir_parser() -> argparse.ArgumentParser:
     version.add_argument("nombre", help="Nombre del diseño (minúsculas, números y guiones).")
     version.add_argument("--motivo", default=None, help="Motivo de la nueva versión (qué cambió).")
     version.add_argument(
-        "--alto-mm", dest="alto_mm", default=None, help="Nuevo alto en milímetros (opcional)."
+        "--tipo-molde",
+        dest="tipo_molde",
+        default=None,
+        help=f"Nuevo tipo de molde (opcional): {', '.join(TIPOS_MOLDE)}.",
+    )
+    version.add_argument(
+        "--alto-mm",
+        dest="alto_mm",
+        default=None,
+        help="Nuevo alto en milímetros (opcional, molde completo).",
+    )
+    version.add_argument(
+        "--largo-mm",
+        dest="largo_mm",
+        default=None,
+        help="Nuevo largo en milímetros (opcional, molde abierto).",
+    )
+    version.add_argument(
+        "--grosor-mm",
+        dest="grosor_mm",
+        default=None,
+        help="Nuevo grosor en milímetros (opcional, molde abierto).",
     )
     version.add_argument(
         "--cavidades", default=None, help="Nuevo número de cavidades del molde (opcional)."
@@ -146,9 +217,9 @@ def _construir_parser() -> argparse.ArgumentParser:
     limpieza.add_argument("nombre", help="Nombre del diseño (minúsculas, números y guiones).")
     limpieza.add_argument(
         "--arriba",
-        default="z",
+        default=None,
         help=f"Eje que debe quedar hacia +Z antes de escalar: {', '.join(EJES_ACEPTADOS)} "
-        '(por defecto "z").',
+        '(si se omite: "z" en molde completo, o el eje de menor extensión en molde abierto).',
     )
     limpieza.add_argument(
         "--caras-max",
@@ -342,16 +413,18 @@ def _validar_eleccion(valor: str, opcion: str, aceptados: tuple[str, ...]) -> st
     return valor
 
 
-def _pedir_opciones_faltantes(valores: dict[str, str | None]) -> list[str]:
+def _pedir_opciones_faltantes(
+    valores: dict[str, str | None], opciones: tuple[str, ...]
+) -> list[str]:
     """Pregunta por cada opción vacía en ``valores`` y la actualiza en el sitio.
 
     Cada respuesta se limpia con ``.strip()``. Devuelve la lista de opciones
     que, tras preguntar, sigan vacías.
     """
-    for clave in _OPCIONES:
+    for clave in opciones:
         if not valores[clave]:
             valores[clave] = input(_PREGUNTAS[clave]).strip()
-    return [clave for clave in _OPCIONES if not valores[clave]]
+    return [clave for clave in opciones if not valores[clave]]
 
 
 def _limpiar_ruta(valor: str) -> str:
@@ -365,6 +438,51 @@ def _limpiar_ruta(valor: str) -> str:
     if len(valor) >= 2 and valor[0] == valor[-1] and valor[0] in ("'", '"'):
         valor = valor[1:-1].strip()
     return str(Path(valor).expanduser())
+
+
+def _determinar_tipo_molde(
+    *,
+    tipo_molde_arg: str | None,
+    alto_mm_arg: str | None,
+    largo_mm_arg: str | None,
+    grosor_mm_arg: str | None,
+) -> str | None:
+    """Deduce el tipo de molde efectivo a partir de las opciones recibidas.
+
+    Si se pasó ``--tipo-molde`` explícito, se usa ese (sin validar aquí: lo
+    valida quien llame). Si no, se deduce de qué medida se dio: `--largo-mm`
+    o `--grosor-mm` implican `"abierto"`; `--alto-mm` implica `"completo"`.
+    Si no se dio ninguna opción de tipo o medida, devuelve ``None`` (tipo
+    indeterminado: quien llame decide si pregunta, usa un valor por defecto o
+    hereda de una versión anterior).
+    """
+    if tipo_molde_arg:
+        return tipo_molde_arg.strip().lower()
+    if largo_mm_arg is not None or grosor_mm_arg is not None:
+        return "abierto"
+    if alto_mm_arg is not None:
+        return "completo"
+    return None
+
+
+def _validar_combinacion_tipo_molde(
+    tipo_molde: str | None,
+    *,
+    alto_mm_arg: str | None,
+    largo_mm_arg: str | None,
+    grosor_mm_arg: str | None,
+) -> None:
+    """Lanza :class:`AltaError` si las medidas recibidas no corresponden a ``tipo_molde``."""
+    if tipo_molde == "completo" and (largo_mm_arg is not None or grosor_mm_arg is not None):
+        raise AltaError(
+            "--largo-mm y --grosor-mm son medidas de --tipo-molde abierto; con --tipo-molde "
+            "completo solo se usa --alto-mm."
+        )
+    if tipo_molde == "abierto" and alto_mm_arg is not None:
+        raise AltaError(
+            "--alto-mm es la medida de --tipo-molde completo; con --tipo-molde abierto se "
+            "usan --largo-mm (obligatorio) y --grosor-mm (opcional)."
+        )
 
 
 def _ejecutar_alta(args: argparse.Namespace) -> int:
@@ -382,10 +500,46 @@ def _ejecutar_alta(args: argparse.Namespace) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
+    tipo_molde = _determinar_tipo_molde(
+        tipo_molde_arg=args.tipo_molde,
+        alto_mm_arg=args.alto_mm,
+        largo_mm_arg=args.largo_mm,
+        grosor_mm_arg=args.grosor_mm,
+    )
+
+    if tipo_molde is None:
+        # Ni --tipo-molde ni ninguna medida: en terminal interactiva se
+        # pregunta el tipo (proponiendo "abierto"); sin terminal, se asume
+        # "abierto" y la medida que falte (--largo-mm) aparecerá más abajo en
+        # la lista de opciones obligatorias faltantes, igual que hoy.
+        if sys.stdin.isatty():
+            respuesta = (
+                input(f"Tipo de molde ({', '.join(TIPOS_MOLDE)}) [abierto]: ").strip().lower()
+            )
+            tipo_molde = respuesta or "abierto"
+        else:
+            tipo_molde = "abierto"
+
+    try:
+        tipo_molde = _validar_eleccion(tipo_molde, "--tipo-molde", TIPOS_MOLDE)
+        _validar_combinacion_tipo_molde(
+            tipo_molde,
+            alto_mm_arg=args.alto_mm,
+            largo_mm_arg=args.largo_mm,
+            grosor_mm_arg=args.grosor_mm,
+        )
+    except AltaError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    opciones_requeridas = _OPCIONES_POR_TIPO_MOLDE[tipo_molde]
+    clave_medida = "alto_mm" if tipo_molde == "completo" else "largo_mm"
+    valor_medida = args.alto_mm if tipo_molde == "completo" else args.largo_mm
+
     valores: dict[str, str | None] = {
         "brief": args.brief,
         "material": args.material,
-        "alto_mm": args.alto_mm,
+        clave_medida: valor_medida,
         "cavidades": args.cavidades,
         "cantidad": args.cantidad,
         "fecha": args.fecha,
@@ -393,10 +547,10 @@ def _ejecutar_alta(args: argparse.Namespace) -> int:
         "origen": args.origen,
     }
 
-    faltantes = [clave for clave in _OPCIONES if not valores[clave]]
+    faltantes = [clave for clave in opciones_requeridas if not valores[clave]]
     if faltantes:
         if sys.stdin.isatty():
-            faltantes = _pedir_opciones_faltantes(valores)
+            faltantes = _pedir_opciones_faltantes(valores, opciones_requeridas)
         if faltantes:
             nombres = ", ".join(_NOMBRES_OPCION[clave] for clave in faltantes)
             print(
@@ -408,11 +562,23 @@ def _ejecutar_alta(args: argparse.Namespace) -> int:
     try:
         material = _validar_eleccion(valores["material"], "--material", MATERIALES)
         licencia = _validar_eleccion(valores["licencia"], "--licencia", LICENCIAS)
-        alto_mm = _parsear_numero_positivo(valores["alto_mm"], "--alto-mm")
         cavidades = _parsear_entero_minimo_uno(valores["cavidades"], "--cavidades")
         cantidad = _parsear_entero_minimo_uno(valores["cantidad"], "--cantidad")
         fecha = _parsear_fecha(valores["fecha"])
         brief = _limpiar_ruta(valores["brief"])
+
+        if tipo_molde == "completo":
+            alto_mm = _parsear_numero_positivo(valores["alto_mm"], "--alto-mm")
+            largo_mm = None
+            grosor_mm = None
+        else:
+            largo_mm = _parsear_numero_positivo(valores["largo_mm"], "--largo-mm")
+            grosor_mm = (
+                _parsear_numero_positivo(args.grosor_mm, "--grosor-mm")
+                if args.grosor_mm is not None
+                else None
+            )
+            alto_mm = None
 
         datos = DatosAlta(
             nombre=args.nombre,
@@ -424,6 +590,9 @@ def _ejecutar_alta(args: argparse.Namespace) -> int:
             fecha=fecha,
             licencia=licencia,
             origen=valores["origen"],
+            tipo_molde=tipo_molde,
+            largo_mm=largo_mm,
+            grosor_mm=grosor_mm,
         )
         ruta = crear_diseno(datos, destino=destino)
     except AltaError as exc:
@@ -443,10 +612,39 @@ def _ejecutar_version(args: argparse.Namespace) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
+    # El tipo de molde efectivo (si se indicó alguno de --tipo-molde,
+    # --largo-mm, --grosor-mm o --alto-mm) sigue las mismas reglas que
+    # `castkit alta`; si no se indicó ninguno, `crear_version` hereda el tipo
+    # de la versión actual.
+    tipo_molde = _determinar_tipo_molde(
+        tipo_molde_arg=args.tipo_molde,
+        alto_mm_arg=args.alto_mm,
+        largo_mm_arg=args.largo_mm,
+        grosor_mm_arg=args.grosor_mm,
+    )
+
     try:
+        if tipo_molde is not None:
+            tipo_molde = _validar_eleccion(tipo_molde, "--tipo-molde", TIPOS_MOLDE)
+            _validar_combinacion_tipo_molde(
+                tipo_molde,
+                alto_mm_arg=args.alto_mm,
+                largo_mm_arg=args.largo_mm,
+                grosor_mm_arg=args.grosor_mm,
+            )
         alto_mm = (
             _parsear_numero_positivo(args.alto_mm, "--alto-mm")
             if args.alto_mm is not None
+            else None
+        )
+        largo_mm = (
+            _parsear_numero_positivo(args.largo_mm, "--largo-mm")
+            if args.largo_mm is not None
+            else None
+        )
+        grosor_mm = (
+            _parsear_numero_positivo(args.grosor_mm, "--grosor-mm")
+            if args.grosor_mm is not None
             else None
         )
         cavidades = (
@@ -471,7 +669,15 @@ def _ejecutar_version(args: argparse.Namespace) -> int:
             return 2
 
     try:
-        nueva_version = crear_version(carpeta, motivo, alto_mm=alto_mm, cavidades=cavidades)
+        nueva_version = crear_version(
+            carpeta,
+            motivo,
+            alto_mm=alto_mm,
+            cavidades=cavidades,
+            tipo_molde=tipo_molde,
+            largo_mm=largo_mm,
+            grosor_mm=grosor_mm,
+        )
     except (AltaError, VersionError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -552,7 +758,7 @@ def _ejecutar_limpieza(args: argparse.Namespace) -> int:
         return 1
 
     try:
-        arriba = validar_arriba(args.arriba)
+        arriba = validar_arriba(args.arriba) if args.arriba is not None else None
         caras_max = (
             _parsear_entero_minimo_uno(args.caras_max, "--caras-max")
             if args.caras_max is not None
@@ -722,10 +928,16 @@ def _ejecutar_mecha(args: argparse.Namespace) -> int:
         return 1
 
     if not resultado["aplicado"]:
-        print(
-            f"El diseño «{args.nombre}» es de «{resultado['material']}»: "
-            "no requiere canal de mecha."
-        )
+        if resultado.get("tipo_molde") == "abierto":
+            print(
+                "Aviso: el canal de mecha solo se hace en molde completo; "
+                f"«{args.nombre}» es molde abierto, no se perforó nada."
+            )
+        else:
+            print(
+                f"El diseño «{args.nombre}» es de «{resultado['material']}»: "
+                "no requiere canal de mecha."
+            )
         return 0
 
     print(
@@ -920,7 +1132,7 @@ def _ejecutar_flujo(args: argparse.Namespace) -> int:
 
     args_limpieza = argparse.Namespace(
         nombre=args.nombre,
-        arriba="z",
+        arriba=None,
         caras_max=None,
         tolerancia_mm=None,
         corte_base_mm=None,

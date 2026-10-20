@@ -27,7 +27,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
-from castkit.diseno import AltaError, carpeta_disenos, validar_nombre
+from castkit.diseno import TIPOS_MOLDE, AltaError, carpeta_disenos, validar_nombre
 
 _PATRON_SEGMENTO = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
@@ -133,10 +133,14 @@ def datos_version(datos: dict[str, Any], version: int | None = None) -> dict[str
     """Devuelve los datos efectivos de una versión de un diseño.
 
     Si ``version`` es ``None``, usa ``version_actual``. El resultado tiene las
-    claves ``version``, ``alto_mm``, ``cavidades`` y ``parametros``. Si la
-    entrada de la versión no tiene ``alto_mm`` o ``cavidades`` (diseños dados
-    de alta antes de este ticket), se usan de respaldo ``medidas.alto_mm`` y
-    ``cavidades`` de nivel superior en ``datos``.
+    claves ``version``, ``tipo_molde``, ``alto_mm``, ``largo_mm``,
+    ``grosor_mm``, ``cavidades`` y ``parametros``. Si la entrada de la versión
+    no tiene ``tipo_molde`` (diseños dados de alta antes del ticket #55), se
+    trata como ``"completo"``. Si no tiene ``alto_mm`` o ``cavidades``
+    (diseños dados de alta antes del ticket #4), se usan de respaldo
+    ``medidas.alto_mm`` y ``cavidades`` de nivel superior en ``datos`` (el
+    respaldo de ``alto_mm`` solo aplica a moldes ``completo``: un molde
+    ``abierto`` no tiene alto objetivo).
     """
     if version is None:
         version = datos["version_actual"]
@@ -147,9 +151,17 @@ def datos_version(datos: dict[str, Any], version: int | None = None) -> dict[str
         raise VersionError(f'El diseño no tiene una versión "{clave}" registrada.')
 
     entrada = versiones[clave]
+
+    tipo_molde = entrada.get("tipo_molde")
+    if tipo_molde is None:
+        tipo_molde = "completo"
+
     alto_mm = entrada.get("alto_mm")
-    if alto_mm is None:
+    if alto_mm is None and tipo_molde == "completo":
         alto_mm = datos.get("medidas", {}).get("alto_mm")
+
+    largo_mm = entrada.get("largo_mm")
+    grosor_mm = entrada.get("grosor_mm")
 
     cavidades = entrada.get("cavidades")
     if cavidades is None:
@@ -157,7 +169,10 @@ def datos_version(datos: dict[str, Any], version: int | None = None) -> dict[str
 
     return {
         "version": version,
+        "tipo_molde": tipo_molde,
         "alto_mm": alto_mm,
+        "largo_mm": largo_mm,
+        "grosor_mm": grosor_mm,
         "cavidades": cavidades,
         "parametros": entrada.get("parametros", {}),
     }
@@ -168,14 +183,20 @@ def crear_version(
     motivo: str,
     alto_mm: float | None = None,
     cavidades: int | None = None,
+    tipo_molde: str | None = None,
+    largo_mm: float | None = None,
+    grosor_mm: float | None = None,
 ) -> int:
     """Crea la siguiente versión del diseño en ``carpeta`` y la deja como actual.
 
     La nueva versión parte de los datos efectivos de la versión actual (ver
-    :func:`datos_version`): copia su alto y sus cavidades salvo que se indiquen
-    ``alto_mm`` o ``cavidades`` explícitos, y copia (de forma independiente)
-    sus parámetros. No modifica ``brief/``, ``input/``, ``work/``, ``output/``
-    ni las entradas de versiones anteriores.
+    :func:`datos_version`): copia su tipo de molde, su alto/largo/grosor y sus
+    cavidades salvo que se indiquen explícitos, y copia (de forma
+    independiente) sus parámetros. Si ``tipo_molde`` cambia a ``"completo"``,
+    ``largo_mm`` y ``grosor_mm`` quedan en ``None`` en la nueva versión (y al
+    revés con ``alto_mm`` si cambia a ``"abierto"``), aunque la versión
+    anterior los tuviera. No modifica ``brief/``, ``input/``, ``work/``,
+    ``output/`` ni las entradas de versiones anteriores.
 
     ``motivo`` no puede quedar vacío tras aplicarle ``.strip()``: si lo está,
     lanza :class:`VersionError` sin escribir nada. Devuelve el número de la
@@ -194,14 +215,42 @@ def crear_version(
     anterior = datos_version(datos, actual)
     nueva_version = actual + 1
 
-    alto_efectivo = alto_mm if alto_mm is not None else anterior["alto_mm"]
+    tipo_efectivo = tipo_molde if tipo_molde is not None else anterior["tipo_molde"]
+    if tipo_efectivo not in TIPOS_MOLDE:
+        raise VersionError(
+            f"--tipo-molde debe ser uno de los siguientes: {', '.join(TIPOS_MOLDE)}; "
+            f'recibido "{tipo_efectivo}".'
+        )
+
+    if tipo_efectivo == "completo":
+        alto_efectivo = alto_mm if alto_mm is not None else anterior["alto_mm"]
+        largo_efectivo = None
+        grosor_efectivo = None
+        if alto_efectivo is None:
+            raise VersionError(
+                "El nuevo tipo de molde «completo» necesita --alto-mm: la versión anterior no "
+                "tiene uno definido."
+            )
+    else:  # abierto
+        alto_efectivo = None
+        largo_efectivo = largo_mm if largo_mm is not None else anterior["largo_mm"]
+        grosor_efectivo = grosor_mm if grosor_mm is not None else anterior["grosor_mm"]
+        if largo_efectivo is None:
+            raise VersionError(
+                "El nuevo tipo de molde «abierto» necesita --largo-mm: la versión anterior no "
+                "tiene uno definido."
+            )
+
     cavidades_efectivas = cavidades if cavidades is not None else anterior["cavidades"]
 
     ahora = datetime.now(UTC).isoformat()
     entrada_nueva = {
         "creada": ahora,
         "motivo": motivo_limpio,
+        "tipo_molde": tipo_efectivo,
         "alto_mm": alto_efectivo,
+        "largo_mm": largo_efectivo,
+        "grosor_mm": grosor_efectivo,
         "cavidades": cavidades_efectivas,
         "parametros": copy.deepcopy(anterior["parametros"]),
     }
@@ -224,8 +273,14 @@ def crear_version(
     return nueva_version
 
 
-def _formatear_numero(valor: float) -> str:
-    """Formatea un número para el CHANGELOG, sin ``.0`` cuando es un entero exacto."""
+def _formatear_numero(valor: float | None) -> str:
+    """Formatea un número para el CHANGELOG, sin ``.0`` cuando es un entero exacto.
+
+    ``None`` (medida que no aplica al tipo de molde efectivo) se formatea como
+    ``"ninguna"``.
+    """
+    if valor is None:
+        return "ninguna"
     if isinstance(valor, float) and valor.is_integer():
         return str(int(valor))
     return str(valor)
@@ -244,10 +299,20 @@ def _anexar_changelog(
 
     lineas = [f"## v{version} — {hoy}", "", f"- {motivo}"]
 
+    if anterior["tipo_molde"] != nueva["tipo_molde"]:
+        lineas.append(f"- Tipo de molde: {anterior['tipo_molde']} → {nueva['tipo_molde']}")
     if anterior["alto_mm"] != nueva["alto_mm"]:
         antes = _formatear_numero(anterior["alto_mm"])
         despues = _formatear_numero(nueva["alto_mm"])
         lineas.append(f"- Alto: {antes} mm → {despues} mm")
+    if anterior["largo_mm"] != nueva["largo_mm"]:
+        antes = _formatear_numero(anterior["largo_mm"])
+        despues = _formatear_numero(nueva["largo_mm"])
+        lineas.append(f"- Largo: {antes} mm → {despues} mm")
+    if anterior["grosor_mm"] != nueva["grosor_mm"]:
+        antes = _formatear_numero(anterior["grosor_mm"])
+        despues = _formatear_numero(nueva["grosor_mm"])
+        lineas.append(f"- Grosor: {antes} mm → {despues} mm")
     if anterior["cavidades"] != nueva["cavidades"]:
         lineas.append(f"- Cavidades: {anterior['cavidades']} → {nueva['cavidades']}")
 
