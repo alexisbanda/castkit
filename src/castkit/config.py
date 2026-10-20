@@ -25,6 +25,15 @@ _CLAVES_MATRIZ = (
     "margen_superior_mm",
     "separacion_cavidades_mm",
 )
+_OPCIONALES_RELIEVE = {
+    "colores_max": 8,
+    "base_mm": 2.0,
+    "paso_mm": 0.4,
+    "escalon_mm": 0.05,
+    "area_min_mm2": 0.5,
+    "placa_mm": 0.0,
+    "placa_margen_mm": 1.0,
+}
 
 # src/castkit/config.py -> src/castkit -> src -> raíz del repositorio.
 _RUTA_POR_DEFECTO = Path(__file__).resolve().parents[2] / "config" / "fabricacion.toml"
@@ -112,3 +121,14 @@ def cargar_config_mecha() -> dict[str, Any]:
 def cargar_config_matriz() -> dict[str, Any]:
     """Carga la sección `[matriz]` de `config/fabricacion.toml`."""
     return _cargar_seccion("matriz", _CLAVES_MATRIZ)
+
+
+def cargar_config_relieve() -> dict[str, Any]:
+    """Carga la sección `[relieve]` de `config/fabricacion.toml`.
+
+    Devuelve un `dict` con `colores_max`, `base_mm`, `paso_mm`, `escalon_mm`,
+    `area_min_mm2`, `placa_mm` y `placa_margen_mm`. Todas las claves son
+    opcionales (si la sección falta o está incompleta, se usan los valores
+    por defecto del proveedor «relieve», ver #43).
+    """
+    return _cargar_seccion("relieve", (), opcionales=_OPCIONALES_RELIEVE)

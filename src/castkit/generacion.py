@@ -33,11 +33,13 @@ from typing import Any, Protocol
 
 import trimesh
 
-from castkit.config import cargar_config_generacion
+from castkit import relieve
+from castkit.config import cargar_config_generacion, cargar_config_relieve
 from castkit.ingesta import IngestaError, sha256_archivo, validar_malla
 from castkit.versiones import (
     VersionError,
     cargar_diseno,
+    datos_version,
     nombre_archivo,
     registrar_parametros,
 )
@@ -445,6 +447,88 @@ class ProveedorImagen3D:
         malla.export(destino_stl, file_type="stl")
 
 
+class ProveedorRelieve:
+    """Proveedor local: bajorrelieve por capas de color para diseños planos (#43).
+
+    Usa la primera imagen del brief y un archivo ``relieve.toml`` junto a
+    ella (lo propone y lo escribe si no existe; ver :mod:`castkit.relieve`).
+    Es, por construcción, un molde abierto (#55): la versión actual del
+    diseño necesita ``tipo_molde == "abierto"`` con ``largo_mm`` y
+    ``grosor_mm``. :func:`generar_malla` llama a :meth:`usar_version` con
+    esos datos antes de invocar :meth:`generar`.
+    """
+
+    def __init__(self, config: dict[str, Any] | None = None) -> None:
+        cfg = config or {}
+        self._config = relieve.ConfigRelieve(
+            colores_max=int(cfg.get("colores_max", 8)),
+            base_mm=float(cfg.get("base_mm", 2.0)),
+            paso_mm=float(cfg.get("paso_mm", 0.4)),
+            escalon_mm=float(cfg.get("escalon_mm", 0.05)),
+            area_min_mm2=float(cfg.get("area_min_mm2", 0.5)),
+            placa_mm=float(cfg.get("placa_mm", 0.0)),
+            placa_margen_mm=float(cfg.get("placa_margen_mm", 1.0)),
+        )
+        self._info_version: dict[str, Any] = {}
+        self.parametros_registro: dict[str, Any] = {}
+
+    def usar_version(self, info_version: dict[str, Any]) -> None:
+        """Recibe los datos de :func:`castkit.versiones.datos_version` de la versión actual."""
+        self._info_version = dict(info_version)
+
+    def generar(self, insumos: InsumosBrief, destino_stl: Path) -> None:
+        if not insumos.imagenes:
+            raise GeneracionError(
+                'El proveedor "relieve" requiere al menos una imagen (.png, .jpg, .webp) en la '
+                "carpeta brief/."
+            )
+
+        tipo_molde = self._info_version.get("tipo_molde", "completo")
+        largo_mm = self._info_version.get("largo_mm")
+        grosor_mm = self._info_version.get("grosor_mm")
+        if tipo_molde != "abierto" or largo_mm is None or grosor_mm is None:
+            raise GeneracionError(
+                'El proveedor "relieve" genera un bajorrelieve de espalda plana, que es un '
+                "molde abierto (#55): la versión actual necesita --tipo-molde abierto, "
+                "--largo-mm y --grosor-mm. Por ejemplo: "
+                '"castkit version <diseño> --motivo <...> --tipo-molde abierto '
+                '--largo-mm <mm> --grosor-mm <mm>" (o --tipo-molde abierto/--largo-mm/'
+                f'--grosor-mm en "castkit alta"). Tipo de molde actual: "{tipo_molde}", '
+                f"largo_mm={largo_mm}, grosor_mm={grosor_mm}."
+            )
+
+        ruta_imagen = insumos.imagenes[0]
+        ruta_toml = ruta_imagen.parent / relieve.NOMBRE_TOML
+
+        try:
+            if not ruta_toml.is_file():
+                datos_relieve = relieve.proponer_relieve(ruta_imagen, self._config)
+                relieve.escribir_relieve_toml(ruta_toml, datos_relieve)
+                print(
+                    f'"relieve": se propusieron alturas a partir de "{ruta_imagen.name}" y se '
+                    f'escribió "{ruta_toml}". Edita "altura_mm" de cada color y vuelve a '
+                    "generar con --reemplazar para ajustarlas."
+                )
+            else:
+                datos_relieve = relieve.leer_relieve_toml(ruta_toml)
+
+            resultado = relieve.generar_malla_relieve(
+                ruta_imagen,
+                datos_relieve,
+                largo_mm=float(largo_mm),
+                grosor_mm=float(grosor_mm),
+                destino_stl=destino_stl,
+            )
+        except relieve.RelieveError as exc:
+            raise GeneracionError(str(exc)) from exc
+
+        self.parametros_registro = {
+            **resultado["parametros_registro"],
+            "colores_max": self._config.colores_max,
+            "relieve_toml_sha256": sha256_archivo(ruta_toml),
+        }
+
+
 def _partir_comando(comando: str, posix: bool = os.name != "nt") -> list[str]:
     """Separa `comando` en argumentos respetando las rutas de Windows.
 
@@ -547,6 +631,8 @@ def obtener_proveedor(
         return ProveedorComando(str(comando))
     if nombre == "imagen-3d":
         return ProveedorImagen3D()
+    if nombre == "relieve":
+        return ProveedorRelieve(cargar_config_relieve())
     if nombre == "tripo3d":
         cfg = config_generacion or {}
         return ProveedorTripo3D(
@@ -554,7 +640,9 @@ def obtener_proveedor(
             espera_max_s=float(cfg.get("tripo_espera_max_s", 600.0)),
         )
 
-    disponibles = sorted({"comando", "imagen-3d", "tripo3d", *_PROVEEDORES_REGISTRADOS.keys()})
+    disponibles = sorted(
+        {"comando", "imagen-3d", "relieve", "tripo3d", *_PROVEEDORES_REGISTRADOS.keys()}
+    )
     raise GeneracionError(
         f'El proveedor de generación 3D "{nombre}" no está registrado. '
         f"Proveedores disponibles: {', '.join(disponibles)}."
@@ -668,6 +756,10 @@ def generar_malla(
     else:
         nombre_proveedor = proveedor if proveedor is not None else str(config_gen["proveedor"])
         instancia_proveedor = obtener_proveedor(nombre_proveedor, config_gen)
+
+        metodo_usar_version = getattr(instancia_proveedor, "usar_version", None)
+        if callable(metodo_usar_version):
+            metodo_usar_version(datos_version(datos))
 
         if not insumos.tiene_insumos_para_proveedor():
             formatos_txt = ", ".join(FORMATOS_SOPORTADOS)

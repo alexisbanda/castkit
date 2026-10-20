@@ -13,7 +13,8 @@ Castkit — Agent-assisted pipeline that turns 3D models into production-ready m
 - **manifold3d**: construye los sólidos de fabricación (la resta booleana del canal de mecha, la matriz en modo figura o cubeta multicavidad).
 - **Blender** (proceso externo, headless): renderiza las 4 vistas del punto de control 1 (motor `CYCLES` en CPU) y, como respaldo, remalla por vóxeles cuando `castkit limpieza` no logra cerrar la malla en Python.
 - **Pillow**: sobreimprime la vista y las medidas en mm sobre cada PNG del punto de control 1.
-- **numpy** y **scipy**: apoyan al proveedor local `imagen-3d` (segmentación, transformada de distancia y suavizado para reconstruir un volumen 3D desde una imagen 2D).
+- **numpy** y **scipy**: apoyan al proveedor local `imagen-3d` (segmentación, transformada de distancia y suavizado para reconstruir un volumen 3D desde una imagen 2D) y al proveedor local `relieve` (separar el fondo, componentes conexas, dilatación de la placa).
+- **scikit-image**: traza los contornos de cada nivel de altura del proveedor local `relieve` (`skimage.measure.find_contours`).
 
 ## Instalación
 
@@ -404,9 +405,9 @@ uv run castkit generar guagua-pan --prompt "guagua de pan tradicional sin socava
   utilizados, el prompt, `sha256`, `caras` y `vertices` en `versiones.v<actual>.parametros.generacion`.
 
 Los `.pdf` y `.ai` del brief solo los recibe el proveedor `comando` (vía la variable de entorno
-`CASTKIT_INSUMOS`, ver abajo): los demás proveedores integrados (`imagen-3d`, `tripo3d`)
-ignoran documentos y mallas `.stl` del brief, y solo usan la primera imagen de `brief/` junto con
-el texto/prompt.
+`CASTKIT_INSUMOS`, ver abajo): los demás proveedores integrados (`imagen-3d`, `relieve`,
+`tripo3d`) ignoran documentos y mallas `.stl` del brief, y solo usan la primera imagen de
+`brief/` junto con el texto/prompt.
 
 ### Proveedores integrados
 
@@ -414,6 +415,7 @@ el texto/prompt.
 | --- | --- | --- |
 | `comando` | todos los insumos (imágenes, `.pdf`/`.ai`, prompt); se los pasa a un comando externo | `comando` en `[generacion]`; si está vacío y hay imágenes, recurre a `imagen-3d` |
 | `imagen-3d` | solo la primera imagen (reconstructor volumétrico local, sin red) | nada (no necesita claves de API) |
+| `relieve` | solo la primera imagen (bajorrelieve local por capas de color, sin red) | molde abierto: `--tipo-molde abierto --largo-mm <mm> --grosor-mm <mm>` (ver abajo) |
 | `tripo3d` | la primera imagen (Imagen→3D) o, si no hay imágenes, el prompt (Texto→3D), vía la API v3 de Tripo | variable de entorno `TRIPO_API_KEY` |
 
 El proveedor `tripo3d` pide solo geometría (sin texturas ni PBR), registra `tripo_modelo` y
@@ -425,12 +427,47 @@ El proveedor `comando` ejecuta el comando configurado pasándole, en variables d
 (rutas de imágenes y documentos separadas por `:`, o `;` en Windows) y `CASTKIT_PROMPT` (el texto
 combinado del brief más `--prompt`).
 
+#### Proveedor `relieve`: bajorrelieve por capas de color (diseños planos)
+
+`relieve` convierte un diseño plano de colores definidos (logo, escudo, medalla, aplique...) en
+un bajorrelieve de espalda plana: cada color pasa a ser un nivel de altura, con aristas nítidas y
+una malla cerrada por construcción (sin IA ni servicios externos). Es, por construcción, un
+**molde abierto** (ver «Dar de alta un diseño»): la versión actual necesita
+`--tipo-molde abierto`, `--largo-mm` (la medida mayor en planta) y `--grosor-mm` (el grosor
+final); si el diseño es `completo` o no tiene `grosor_mm`, `castkit generar --proveedor relieve`
+termina con un mensaje que explica qué poner.
+
+```bash
+uv run castkit alta escudo --brief ./brief-escudo --material porcelana-fria \
+  --tipo-molde abierto --largo-mm 70 --cavidades 1 --cantidad 10 --fecha 2026-12-01 \
+  --licencia propio --origen "diseño propio"
+uv run castkit version escudo --motivo "grosor del relieve" --grosor-mm 6
+uv run castkit generar escudo --proveedor relieve
+```
+
+En la primera generación, separa el fondo de la imagen (el color conectado al borde; el mismo
+color encerrado dentro de la figura, por ejemplo una letra blanca sobre fondo blanco, no es
+fondo), reduce el diseño a sus colores planos y propone una altura relativa por color (el de
+mayor área es la base; los demás, de más a menos área, suben); escribe la propuesta en
+`brief/relieve.toml` y lo dice en el mensaje. El operador edita `altura_mm` de cada color en ese
+archivo y vuelve a generar con `--reemplazar` para ajustarlas; las alturas de `relieve.toml` son
+relativas entre sí, y castkit las reescala para que la más alta coincida con `grosor_mm`. Se
+añaden 0,5 mm de base sacrificable que `castkit limpieza` recorta, dejando la espalda plana y el
+grosor exacto (la figura limpia mide `largo_mm` en su lado mayor y `grosor_mm` de alto).
+
+Cada nivel se traza con `skimage` y se contrae `escalon_mm` respecto al de abajo (evita paredes
+coincidentes); las manchas menores que `area_min_mm2` se descartan. Las piezas sueltas (islas,
+como estrellas separadas del cuerpo principal) se aceptan como piezas independientes y su altura
+se limita al nivel más bajo del diseño; si se indica `placa_mm` > 0 en `relieve.toml`, todo el
+diseño se apoya en una placa (con la silueta conjunta ampliada `placa_margen_mm`) y la malla
+queda en un solo cuerpo.
+
 ### Opciones de `castkit generar`
 
 | Opción | Obligatoria | Valores aceptados |
 | --- | --- | --- |
 | `nombre` (posicional) | sí | nombre de un diseño ya dado de alta |
-| `--proveedor` | no | `comando`, `imagen-3d`, `tripo3d`, o un proveedor registrado en tiempo de ejecución (si se omite, se usa `config/fabricacion.toml`) |
+| `--proveedor` | no | `comando`, `imagen-3d`, `relieve`, `tripo3d`, o un proveedor registrado en tiempo de ejecución (si se omite, se usa `config/fabricacion.toml`) |
 | `--prompt` | no | texto o prompt de contexto adicional para el generador 3D |
 | `--reemplazar` | no | reemplaza sin preguntar la malla ya guardada en la versión actual, si existe |
 
@@ -450,6 +487,37 @@ tripo_espera_max_s = 600
 - `tripo_modelo`: versión del modelo de Tripo3D (API v3) usada por el proveedor `tripo3d`.
 - `tripo_espera_max_s`: plazo máximo, en segundos, que el proveedor `tripo3d` espera a que la
   tarea termine antes de fallar.
+
+### `[relieve]` en `config/fabricacion.toml`
+
+Valores por defecto que el proveedor `relieve` copia a un `brief/relieve.toml` nuevo (ver arriba):
+
+```toml
+[relieve]
+colores_max = 8
+base_mm = 2.0
+paso_mm = 0.4
+escalon_mm = 0.05
+area_min_mm2 = 0.5
+placa_mm = 0
+placa_margen_mm = 1.0
+```
+
+- `colores_max`: número máximo de colores planos al reducir la imagen (`Image.quantize`).
+- `base_mm`: altura relativa propuesta para el color de mayor área (la base del relieve).
+- `paso_mm`: milímetros que sube la altura propuesta de un color al siguiente, de más a menos
+  área (los detalles pequeños quedan más altos).
+- `escalon_mm`: milímetros que se contrae cada nivel respecto al de abajo (evita paredes
+  coincidentes entre niveles).
+- `area_min_mm2`: área mínima, en mm², de una mancha de color para que no se descarte (limpia el
+  antialias y el ruido de la imagen).
+- `placa_mm`: grosor de la placa de apoyo; `0` = sin placa (las islas quedan limitadas a la
+  altura base).
+- `placa_margen_mm`: margen de la placa alrededor de la silueta conjunta del diseño (si
+  `placa_mm` > 0).
+
+Estos mismos valores (salvo `colores_max`, que solo se usa al proponer) se guardan también, ya
+resueltos, en cada `brief/relieve.toml` (ver arriba).
 
 ## Punto de control 1: renders de las 4 vistas y aprobación (`castkit control1`)
 
