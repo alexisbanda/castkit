@@ -34,6 +34,17 @@ _OPCIONALES_RELIEVE = {
     "placa_mm": 0.0,
     "placa_margen_mm": 1.0,
 }
+_OPCIONALES_PROFUNDIDAD = {
+    "modelo": "depth-anything/Depth-Anything-V2-Small-hf",
+    # Revisión (commit) fija del repo del modelo en Hugging Face: Apache-2.0.
+    "revision": "5426e4f0f36572d16453bbda7a8389317b1bef99",
+    "borde_mm": 4.0,
+    "realce_mm": 1.2,
+    "suavizado": 0.6,
+    "ancho_min_mm": 2.5,
+    "engrose_mm": 0.6,
+    "mm_por_px": 0.2,
+}
 
 # src/castkit/config.py -> src/castkit -> src -> raíz del repositorio.
 _RUTA_POR_DEFECTO = Path(__file__).resolve().parents[2] / "config" / "fabricacion.toml"
@@ -132,3 +143,14 @@ def cargar_config_relieve() -> dict[str, Any]:
     por defecto del proveedor «relieve», ver #43).
     """
     return _cargar_seccion("relieve", (), opcionales=_OPCIONALES_RELIEVE)
+
+
+def cargar_config_profundidad() -> dict[str, Any]:
+    """Carga la sección `[profundidad]` de `config/fabricacion.toml`.
+
+    Devuelve un `dict` con `modelo`, `revision`, `borde_mm`, `realce_mm`,
+    `suavizado`, `ancho_min_mm`, `engrose_mm` y `mm_por_px`. Todas las claves
+    son opcionales (si la sección falta o está incompleta, se usan los valores
+    por defecto del proveedor «profundidad», ver #56).
+    """
+    return _cargar_seccion("profundidad", (), opcionales=_OPCIONALES_PROFUNDIDAD)

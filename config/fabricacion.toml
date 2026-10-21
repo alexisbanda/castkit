@@ -77,6 +77,47 @@ placa_mm = 0
 # diseño (solo si placa_mm > 0).
 placa_margen_mm = 1.0
 
+[profundidad]
+# Proveedor local "profundidad" (#56): media figura para molde abierto desde
+# una imagen frontal, con un mapa de profundidad (Depth Anything V2 Small) y
+# el sombreado de la imagen. Es, como "relieve", un molde abierto: necesita
+# --tipo-molde abierto, --largo-mm y --grosor-mm.
+
+# Único modelo admitido (licencia Apache-2.0, uso comercial permitido). Las
+# variantes Base y Large de Depth Anything V2 son CC-BY-NC (no comercial) y
+# se rechazan con un mensaje que explica la licencia.
+modelo = "depth-anything/Depth-Anything-V2-Small-hf"
+
+# Revisión (commit) fija del repositorio del modelo en Hugging Face, para no
+# depender de que el modelo cambie de contenido sin aviso.
+revision = "5426e4f0f36572d16453bbda7a8389317b1bef99"
+
+# Altura, en milímetros, del punto más bajo de la figura (el borde). El
+# grosor_mm del diseño es el máximo.
+borde_mm = 4.0
+
+# Milímetros, entre borde_mm y grosor_mm, dedicados a realzar los motivos
+# finos a partir del sombreado de la imagen (la profundidad por sí sola los
+# suaviza).
+realce_mm = 1.2
+
+# Sigma (en píxeles de la resolución de trabajo, ver mm_por_px) del suavizado
+# gaussiano del campo de alturas.
+suavizado = 0.6
+
+# Partes de la figura más estrechas que esto (mm) se ensanchan (ver
+# engrose_mm) para que no desaparezcan al moldear o imprimir.
+ancho_min_mm = 2.5
+
+# Milímetros que se ensancha, por lado, cada parte más estrecha que
+# ancho_min_mm.
+engrose_mm = 0.6
+
+# Resolución de trabajo (mm por píxel) del campo de alturas: no es la
+# resolución de la imagen de entrada, sino la de la malla (más fino = más
+# detalle y más memoria/tiempo).
+mm_por_px = 0.2
+
 [mecha]
 # Diámetro, en milímetros, del canal de mecha vertical para figuras de cera.
 diametro_mecha_mm = 3.0
