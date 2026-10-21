@@ -7,8 +7,11 @@ un mapa de profundidad sintético (cerrada, espalda plana, altura máxima
 `grosor_mm`, contorno trazado como polígono suavizado sin escalones), el
 registro de parámetros (modelo, revisión, sha256 de la imagen y del TOML), el
 error de molde completo/sin `grosor_mm`, el mensaje del extra opcional no
-instalado (real: `torch` no está instalado en este entorno de tests) y la
-cota de memoria al construir la malla de una imagen grande.
+instalado (real: `torch` no está instalado en este entorno de tests), la cota
+de memoria al construir la malla de una imagen grande, el tope de caras de la
+malla en bruto (`caras_max`, #56 ronda 2) y que la extensión del campo de
+alturas fuera de la figura no deja saltos en escalón (origen de la "ceja" y
+las "planchas" de la pared, #56 ronda 2).
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ import numpy as np
 import pytest
 import trimesh
 from PIL import Image, ImageDraw
+from scipy import ndimage
 
 from castkit import profundidad
 from castkit.cli import main
@@ -44,6 +48,8 @@ _CONFIG_PROFUNDIDAD: dict[str, float] = {
     "ancho_min_mm": 2.5,
     "engrose_mm": 0.6,
     "mm_por_px": 0.2,
+    "tolerancia_mm": 0.03,
+    "caras_max": 120000,
 }
 
 
@@ -510,3 +516,133 @@ def test_memoria_al_construir_la_malla_de_una_imagen_de_1024_px(
     )
     malla_limpia = trimesh.load(resultado["destino"], force="mesh")
     assert malla_limpia.is_watertight
+
+
+# ---------------------------------------------------------------------------
+# Criterio (#56, ronda 2): menos caras en la malla en bruto, sin perder los
+# motivos. Con la imagen sintética de 1024 px y largo 100 mm (la medida real
+# que hizo fallar `castkit limpieza` en la prueba en vivo: 395 544 caras), la
+# malla no pasa de `caras_max` y sigue cerrada al recargarla.
+# ---------------------------------------------------------------------------
+
+
+def test_malla_de_1024_px_y_largo_100_mm_no_pasa_de_caras_max(tmp_path: Path) -> None:
+    ruta_imagen = tmp_path / "grande.png"
+    _imagen_blob_grande(ruta_imagen)
+    mapa = _estimador_sintetico(ruta_imagen, profundidad.MODELO_PERMITIDO, "main")
+
+    destino = tmp_path / "grande.stl"
+    profundidad.generar_malla_profundidad(
+        ruta_imagen,
+        mapa,
+        _CONFIG_PROFUNDIDAD,
+        largo_mm=100.0,
+        grosor_mm=20.0,
+        destino_stl=destino,
+    )
+
+    malla = trimesh.load(destino, force="mesh")
+    assert malla.is_watertight
+    assert len(malla.faces) <= _CONFIG_PROFUNDIDAD["caras_max"]
+
+
+def test_caras_max_demasiado_bajo_falla_con_mensaje_claro(tmp_path: Path) -> None:
+    """Si ni subiendo la tolerancia 8 veces se baja de `caras_max`, falla con un mensaje
+    que pide subir `caras_max` o `mm_por_px` (en vez de devolver una malla sobre el límite).
+    """
+    ruta_imagen = tmp_path / "frontal.png"
+    _imagen_blob(ruta_imagen)
+    mapa = _estimador_sintetico(ruta_imagen, profundidad.MODELO_PERMITIDO, "main")
+
+    config = dict(_CONFIG_PROFUNDIDAD, caras_max=4)
+    with pytest.raises(profundidad.ProfundidadError, match="caras_max"):
+        profundidad.generar_malla_profundidad(
+            ruta_imagen,
+            mapa,
+            config,
+            largo_mm=50.0,
+            grosor_mm=10.0,
+            destino_stl=tmp_path / "x.stl",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Criterio (#56, ronda 2): la extensión del campo de alturas fuera de la
+# figura (la que usa la pared, ver _extender_suave) no deja saltos en
+# escalón entre celdas vecinas, a diferencia de un vecino más cercano puro
+# (distance_transform_edt) — origen de la "ceja" (una cresta en el borde
+# superior de la pared) y las "planchas" (escalones en planta) reportadas en
+# la prueba en vivo con el cóndor.
+# ---------------------------------------------------------------------------
+
+
+def test_extender_suave_preserva_interior_y_evita_saltos_tipo_voronoi() -> None:
+    tam = 60
+    valido = np.zeros((tam, tam), dtype=bool)
+    valores = np.zeros((tam, tam))
+    valido[10, :] = True
+    valores[10, :] = 2.0
+    valido[49, :] = True
+    valores[49, :] = 9.0
+
+    extendido = profundidad._extender_suave(valido, valores)
+
+    # El interior (donde `valido`) no cambia, y el resultado es finito en toda la
+    # imagen (cubre de sobra el margen que lo usa, ver _DIFUSION_ITERACIONES).
+    assert np.allclose(extendido[valido], valores[valido])
+    assert np.all(np.isfinite(extendido))
+
+    # Un vecino más cercano puro (lo que hacía la versión anterior) deja un salto de
+    # 7 mm de golpe justo donde "el más cercano" cambia de la fila 10 a la 49 (a
+    # mitad de camino entre ambas). El difusor, en cambio, reparte ese cambio en una
+    # rampa: su mayor salto entre filas vecinas es mucho menor.
+    _, (iy, ix) = ndimage.distance_transform_edt(~valido, return_indices=True)
+    vecino_cercano = np.where(valido, valores, valores[iy, ix])
+    salto_vecino = float(np.max(np.abs(np.diff(vecino_cercano[10:50, 5]))))
+    salto_difusor = float(np.max(np.abs(np.diff(extendido[10:50, 5]))))
+
+    assert salto_vecino == pytest.approx(7.0, abs=0.01)
+    assert salto_difusor < salto_vecino / 2
+
+
+def test_pared_no_se_engancha_a_la_rejilla_de_mm_por_px(tmp_path: Path) -> None:
+    """La pared no "engancha" vértices a la rejilla de trabajo (``mm_por_px``).
+
+    Una ronda anterior construía la pared intersecando (CSG, `Manifold.batch_boolean`)
+    un sólido-rejilla (un vértice por píxel) con el prisma del contorno suavizado: eso
+    "enganchaba" buena parte del corte a los ejes de la rejilla en vez de seguir el
+    polígono (se midió hasta un 52% de los vértices de pared cayendo justo sobre la
+    rejilla de 0,2 mm, cuando al azar debería ser ~10%), dejando escalones en planta
+    ("planchas" a distinta profundidad) y una cresta en el borde superior ("ceja") —
+    ver #56, ronda 2. Esta ronda construye la pared extruyendo el contorno a una altura
+    unitaria y combando cada vértice con `Manifold.warp_batch` (solo mueve vértices, sin
+    CSG): la fracción de vértices "de pared" sobre la rejilla debe volver a la que da el
+    azar.
+    """
+    ruta_imagen = tmp_path / "frontal.png"
+    _imagen_blob(ruta_imagen)
+    mapa = _estimador_sintetico(ruta_imagen, profundidad.MODELO_PERMITIDO, "main")
+
+    destino = tmp_path / "blob.stl"
+    profundidad.generar_malla_profundidad(
+        ruta_imagen,
+        mapa,
+        _CONFIG_PROFUNDIDAD,
+        largo_mm=50.0,
+        grosor_mm=10.0,
+        destino_stl=destino,
+    )
+
+    malla = trimesh.load(destino, force="mesh")
+    assert malla.is_watertight
+
+    mm_por_px = _CONFIG_PROFUNDIDAD["mm_por_px"]
+    normales = malla.face_normals
+    pared = np.abs(normales[:, 2]) < 0.3
+    assert pared.sum() > 0
+    puntos = malla.vertices[malla.faces[pared].ravel()]
+    resto_x = np.abs(np.mod(puntos[:, 0] + 1000 * mm_por_px, mm_por_px))
+    resto_x = np.minimum(resto_x, mm_por_px - resto_x)
+    fraccion_en_rejilla = float(np.mean(resto_x < 0.01))
+
+    assert fraccion_en_rejilla < 0.25
