@@ -118,6 +118,17 @@ engrose_mm = 0.6
 # detalle y más memoria/tiempo).
 mm_por_px = 0.2
 
+# Tolerancia (mm) con la que se simplifica la malla final (Manifold.simplify):
+# ninguna superficie se mueve más que esto. Si no basta para bajar de
+# caras_max, se sube automáticamente (hasta 8 veces) antes de generar.
+tolerancia_mm = 0.03
+
+# Número máximo de caras de la malla en bruto (antes de `castkit limpieza`).
+# Si tolerancia_mm no alcanza para bajar de este límite, se sube
+# automáticamente; si aun así no alcanza, la generación falla (sube
+# caras_max o reduce mm_por_px).
+caras_max = 120000
+
 [mecha]
 # Diámetro, en milímetros, del canal de mecha vertical para figuras de cera.
 diametro_mecha_mm = 3.0

@@ -31,22 +31,36 @@ Pasos (ver también los prototipos de referencia y sus lecciones en
    del sombreado (motivos finos que la profundidad suaviza), todo suavizado con
    ``suavizado`` (sigma en píxeles de trabajo) y reescalado para que el máximo
    coincida exactamente con ``grosor_mm``. Fuera de la figura (en el margen que se usa
-   para la pared) se extiende por vecino más cercano, para que la pared no caiga a 0.
-5. Malla **sin escalones**: el campo de alturas se muestrea por vértice (cada píxel de
-   la rejilla de trabajo es un vértice con su propia altura ya continua, no un valor
-   constante por celda) y se tapa por abajo con una base plana en z=0, sobre una
-   región bastante más ancha que la figura (margen de seguridad). El contorno final
-   se traza sobre la máscara ensanchada, suavizada con un gaussiano (para que siga un
-   polígono, no el borde pixelado) y convertida en un ``manifold3d.CrossSection`` con
-   cierre morfológico (:func:`castkit.relieve._seccion_mm`). La intersección 3D de
-   ambos sólidos deja paredes verticales lisas (las del contorno) con el borde
-   superior interpolado del campo de alturas (continuo, sin escalones).
-6. Se añaden :data:`castkit.relieve.CORTE_SACRIFICABLE_MM` (0,5 mm) de base
+   para la pared) se extiende con un difusor (:func:`_extender_suave`: un promedio
+   ponderado por un gaussiano, numerador y denominador, dividiendo una sola vez al
+   final), para que la pared no caiga a 0 y la extensión sea continua con el interior
+   — un vecino más cercano puro deja "celdas de Voronoi" con saltos de altura entre sí.
+5. Malla **sin escalones y sin CSG**: el contorno final (la máscara ensanchada,
+   suavizada con un gaussiano para que siga un polígono y no el borde pixelado,
+   convertida en un ``manifold3d.CrossSection`` con cierre morfológico, ver
+   :func:`castkit.relieve._seccion_mm`) se extruye a una altura unitaria (un prisma
+   recto normal) y se subdivide (``Manifold.refine_to_length``) a la resolución de
+   trabajo. Cada vértice se comba con ``Manifold.warp_batch`` multiplicando su z (0..1)
+   por la altura real en ese punto (interpolada bilinealmente del campo de alturas,
+   ``scipy.ndimage.map_coordinates``). Como ``warp_batch`` solo mueve vértices (no hace
+   una intersección 3D), la pared queda exactamente en el contorno (x/y no se tocan) y
+   el borde superior sigue la altura real por vértice, sin escalones. Una ronda
+   anterior intersecaba (CSG) un sólido-rejilla con un prisma del contorno: eso
+   "enganchaba" buena parte del corte a los ejes de la rejilla en vez de seguir el
+   polígono (hasta 52% de los vértices de pared justo sobre la rejilla, cuando al azar
+   debería ser ~10%), dejando escalones en planta ("planchas" a distinta profundidad) y
+   una cresta en el borde superior ("ceja") — ver #56, ronda 2.
+6. Menos caras sin perder los motivos: el sólido se simplifica (``Manifold.simplify``)
+   con ``tolerancia_mm`` (ninguna superficie se mueve más que eso); si el resultado
+   sigue por encima de ``caras_max``, se sube la tolerancia (hasta 8 veces) e intenta de
+   nuevo, y si aun así no alcanza, falla con un mensaje que pide subir ``caras_max`` o
+   ``mm_por_px``.
+7. Se añaden :data:`castkit.relieve.CORTE_SACRIFICABLE_MM` (0,5 mm) de base
    sacrificable (misma silueta que el contorno final) debajo de todo; `castkit
    limpieza` la recorta en un molde abierto (#55), dejando la espalda plana y el
    grosor exacto. Antes de devolver el resultado, la malla exportada se recarga con
    `trimesh` y se comprueba que sigue cerrada.
-7. ``brief/profundidad.toml`` guarda, resueltos, los valores de altura usados (copia
+8. ``brief/profundidad.toml`` guarda, resueltos, los valores de altura usados (copia
    de ``[profundidad]`` la primera vez que se genera esta versión; si el operador lo
    edita, se respeta).
 """
@@ -78,25 +92,32 @@ CLAVES_PROFUNDIDAD = (
     "ancho_min_mm",
     "engrose_mm",
     "mm_por_px",
+    "tolerancia_mm",
+    "caras_max",
 )
 
-# Margen (en píxeles de la resolución de trabajo) con el que se dilata la figura
-# ensanchada antes de muestrear el campo de alturas: cubre de sobra el contorno
-# final (suavizado y con cierre morfológico), para que la pared nunca se corte
-# contra una zona del campo sin datos (alturas en 0).
+# Número de veces que se multiplica tolerancia_mm (ver generar_malla_profundidad) para
+# intentar bajar de caras_max si la primera simplificación no alcanza; con esto basta de
+# sobra (cada intento, aproximadamente, divide a la mitad el número de caras — ver el
+# criterio #1 del ticket #56 ronda 2).
+_INTENTOS_SIMPLIFICAR = 8
+_FACTOR_SIMPLIFICAR = 1.6
+
+# Margen (en píxeles de la resolución de trabajo) con el que se acolchona la figura
+# ensanchada al reservar el campo de alturas (ver más abajo, "margen_px"): dale sitio
+# de sobra al contorno final (suavizado y con cierre morfológico) y a la extensión del
+# campo de alturas (ver _extender_suave) para que la pared, al combarse, siempre tenga
+# datos reales cerca (no el borde del array).
 _MARGEN_CAMPO_PX = 4
 
-# Semilla fija y magnitud (mm) de un jitter determinista aplicado en XY a los
-# vértices del campo de alturas antes de intersecarlo con el prisma del
-# contorno. manifold3d (CSG robusto en float32) puede dejar la malla sin
-# cerrar al recargar el STL cuando una rejilla muy regular (muchos vértices
-# alineados en los mismos ejes/valores) se corta con un polígono con miles de
-# segmentos: un jitter minúsculo (muy por debajo de cualquier tolerancia de
-# impresión o de los criterios de este proveedor) rompe esa alineación sin
-# alterar la geometría de forma perceptible. Es determinista (misma semilla)
-# para que la misma imagen produzca siempre el mismo STL.
-_SEMILLA_JITTER = 0
-_JITTER_MM = 0.005
+# Sigma (px de trabajo) e iteraciones del difusor que extiende el campo de
+# alturas fuera de la figura (ver _extender_suave): un vecino más cercano
+# puro (distance_transform_edt) deja "celdas de Voronoi" con saltos de altura
+# entre sí, justo en el margen que usa la pared. El difusor pondera los valores
+# válidos con un gaussiano (equivalente a uno de sigma mayor, aplicado varias
+# veces por costo), así la extensión es continua con el interior, sin saltos.
+_DIFUSION_SIGMA_PX = 1.5
+_DIFUSION_ITERACIONES = 14
 
 # Sigma (px, resolución de trabajo) del suavizado de la máscara antes de trazar el
 # contorno final: evita que el contorno siga el borde pixelado (en escalón).
@@ -204,6 +225,14 @@ def escribir_profundidad_toml(ruta_toml: Path, datos: dict[str, Any]) -> None:
         f"mm_por_px = {_formatear_numero(datos['mm_por_px'])}",
         "# Resolución de trabajo (mm por píxel) del campo de alturas: no es la resolución de la",
         "# imagen de entrada, sino la de la malla (más fino = más detalle y más memoria/tiempo).",
+        f"tolerancia_mm = {_formatear_numero(datos['tolerancia_mm'])}",
+        "# Tolerancia (mm) con la que se simplifica la malla final (Manifold.simplify): ninguna",
+        "# superficie se mueve más que esto. Si no basta para bajar de caras_max, se sube",
+        "# automáticamente (hasta 8 veces) antes de generar.",
+        f"caras_max = {int(datos['caras_max'])}",
+        "# Número máximo de caras de la malla en bruto (antes de `castkit limpieza`). Si",
+        "# tolerancia_mm no alcanza para bajar de este límite, se sube automáticamente; si aun",
+        "# así no alcanza, la generación falla (sube caras_max o reduce mm_por_px).",
         "",
     ]
     contenido = "\n".join(lineas).rstrip("\n") + "\n"
@@ -276,121 +305,31 @@ def _trazar_contorno(mascara: np.ndarray, mm_por_px: float) -> Any | None:
     return _seccion_mm(suave, mm_por_px, 0.01)
 
 
-def _malla_campo_alturas(campo: np.ndarray, alto: np.ndarray, mm_por_px: float) -> trimesh.Trimesh:
-    """Sólido del campo de alturas sobre la región ``campo``, sin escalones.
+def _extender_suave(valido: np.ndarray, valores: np.ndarray) -> np.ndarray:
+    """Extiende ``valores`` (válidos donde ``valido``) fuera de esa región, sin saltos.
 
-    Cada píxel de la rejilla de trabajo es un vértice con su propia altura (ya
-    continua: ``alto`` no tiene niveles discretos, a diferencia de las terrazas de
-    `relieve`), no un valor constante por celda; dos celdas vecinas comparten sus
-    vértices y, por tanto, su altura en el borde común. La base es un plano en z=0
-    con la misma huella. Usa la MISMA convención de coordenadas que
-    :func:`castkit.relieve._seccion_mm` (``x = columna · mm_por_px``,
-    ``y = (filas + 4 − fila) · mm_por_px``, con ``filas = campo.shape[0]``) para que
-    este sólido quede exactamente alineado con el contorno (otro `CrossSection`
-    construido con esa misma función) al intersecarlos en 3D.
+    A diferencia de un vecino más cercano puro (``distance_transform_edt``), que deja
+    "celdas de Voronoi" con un salto de valor entre sí, pondera los valores válidos con
+    un gaussiano aplicado ``_DIFUSION_ITERACIONES`` veces (equivalente a un único
+    gaussiano de sigma ``_DIFUSION_SIGMA_PX * sqrt(_DIFUSION_ITERACIONES)``, pero más
+    barato de calcular sobre una rejilla grande) tanto al numerador (``valido * valores``)
+    como al denominador (``valido``), y solo divide AL FINAL (una sola vez): dividir en
+    cada iteración, como una relajación de Jacobi, amplifica el error exponencialmente
+    (el peso cerca del borde del margen es casi 0) y la extensión sale con valores
+    absurdos. El resultado de este promedio ponderado es continuo con el interior y
+    entre celdas vecinas, sin escalones. Devuelve un `ndarray` del mismo tamaño que
+    ``valores``, finito en toda la imagen con suficientes iteraciones para cubrir el
+    margen que la use (ver :data:`_DIFUSION_ITERACIONES`).
     """
-    filas, columnas = campo.shape
-    campo = campo.copy()
-
-    # Sin contactos en diagonal entre celdas activas (un vértice que solo tocara a
-    # otra celda por una esquina dejaría una arista no variedad en la malla).
-    for _ in range(10):
-        a, b = campo[:-1, :-1], campo[:-1, 1:]
-        c, d = campo[1:, :-1], campo[1:, 1:]
-        diagonal = (a & d & ~b & ~c) | (b & c & ~a & ~d)
-        if not diagonal.any():
-            break
-        for dr, dc in ((0, 0), (0, 1), (1, 0), (1, 1)):
-            campo[dr : dr + filas - 1, dc : dc + columnas - 1] |= diagonal
-
-    quad_activo = campo[:-1, :-1] & campo[:-1, 1:] & campo[1:, :-1] & campo[1:, 1:]
-    if not quad_activo.any():
-        raise ProfundidadError("El campo de alturas quedó vacío (revisa mm_por_px y los márgenes).")
-
-    vertice_activo = np.zeros((filas, columnas), dtype=bool)
-    vertice_activo[:-1, :-1] |= quad_activo
-    vertice_activo[:-1, 1:] |= quad_activo
-    vertice_activo[1:, :-1] |= quad_activo
-    vertice_activo[1:, 1:] |= quad_activo
-
-    indices_sup = np.full((filas, columnas), -1, dtype=np.int32)
-    n_activos = int(vertice_activo.sum())
-    indices_sup[vertice_activo] = np.arange(n_activos, dtype=np.int32)
-    indices_inf = np.where(vertice_activo, indices_sup + n_activos, -1).astype(np.int32)
-
-    filas_v, cols_v = np.where(vertice_activo)
-    xs = cols_v.astype(np.float64) * mm_por_px
-    ys = (filas + 4 - filas_v).astype(np.float64) * mm_por_px
-
-    # Jitter determinista (ver _JITTER_MM): se aplica a xs/ys ANTES de
-    # construir los vértices de techo y base, así ambos (misma columna/fila)
-    # se desplazan igual y las paredes laterales siguen exactamente verticales.
-    rng = np.random.default_rng(_SEMILLA_JITTER)
-    xs = xs + rng.uniform(-_JITTER_MM, _JITTER_MM, size=xs.shape)
-    ys = ys + rng.uniform(-_JITTER_MM, _JITTER_MM, size=ys.shape)
-    zs = alto[filas_v, cols_v]
-
-    vertices = np.empty((2 * n_activos, 3), dtype=np.float64)
-    vertices[:n_activos] = np.column_stack([xs, ys, zs])
-    vertices[n_activos:] = np.column_stack([xs, ys, np.zeros_like(zs)])
-
-    # Construcción vectorizada (sin bucle por celda en Python: con cientos de
-    # miles de celdas, ese bucle es lento y gasta mucha memoria en listas de
-    # tuplas). Las 4 esquinas de cada celda activa, de techo y de base.
-    filas_q, cols_q = np.where(quad_activo)
-    s00 = indices_sup[filas_q, cols_q]
-    s10 = indices_sup[filas_q + 1, cols_q]
-    s11 = indices_sup[filas_q + 1, cols_q + 1]
-    s01 = indices_sup[filas_q, cols_q + 1]
-    i00 = indices_inf[filas_q, cols_q]
-    i10 = indices_inf[filas_q + 1, cols_q]
-    i11 = indices_inf[filas_q + 1, cols_q + 1]
-    i01 = indices_inf[filas_q, cols_q + 1]
-
-    bloques_caras = [
-        np.column_stack([s00, s10, s11]),
-        np.column_stack([s00, s11, s01]),
-        np.column_stack([i00, i11, i10]),
-        np.column_stack([i00, i01, i11]),
-    ]
-
-    # Paredes laterales: una celda activa necesita pared en cada lado cuyo
-    # vecino (en esa dirección) no está activo (incluido el borde de la rejilla).
-    vecino_arriba = np.zeros_like(quad_activo)
-    vecino_arriba[1:, :] = quad_activo[:-1, :]
-    vecino_abajo = np.zeros_like(quad_activo)
-    vecino_abajo[:-1, :] = quad_activo[1:, :]
-    vecino_izq = np.zeros_like(quad_activo)
-    vecino_izq[:, 1:] = quad_activo[:, :-1]
-    vecino_der = np.zeros_like(quad_activo)
-    vecino_der[:, :-1] = quad_activo[:, 1:]
-
-    def _agregar_pared(mascara_borde: np.ndarray, esquinas: tuple[str, str]) -> None:
-        a, b = esquinas
-        ra, ca = np.where(mascara_borde)
-        if ra.size == 0:
-            return
-        esquina_a = {"00": (ra, ca), "10": (ra + 1, ca), "11": (ra + 1, ca + 1), "01": (ra, ca + 1)}
-        fa, cola = esquina_a[a]
-        fb, colb = esquina_a[b]
-        sa, sb = indices_sup[fa, cola], indices_sup[fb, colb]
-        ia, ib = indices_inf[fa, cola], indices_inf[fb, colb]
-        bloques_caras.append(np.column_stack([sa, sb, ib]))
-        bloques_caras.append(np.column_stack([sa, ib, ia]))
-
-    _agregar_pared(quad_activo & ~vecino_arriba, ("00", "01"))
-    _agregar_pared(quad_activo & ~vecino_abajo, ("11", "10"))
-    _agregar_pared(quad_activo & ~vecino_izq, ("10", "00"))
-    _agregar_pared(quad_activo & ~vecino_der, ("01", "11"))
-
-    caras = np.concatenate(bloques_caras, axis=0).astype(np.int64)
-    # Sin process=True: la conectividad ya es la de una malla cerrada válida
-    # (vértices compartidos por construcción), y process=True repetiría ese
-    # trabajo (fusión de vértices, caras degeneradas) sin necesidad, con el
-    # único costo de más memoria para una malla de cientos de miles de caras.
-    malla = trimesh.Trimesh(vertices=vertices, faces=caras, process=False)
-    trimesh.repair.fix_normals(malla)
-    return malla
+    numerador = np.where(valido, valores, 0.0)
+    denominador = valido.astype(np.float64)
+    for _ in range(_DIFUSION_ITERACIONES):
+        numerador = ndimage.gaussian_filter(numerador, _DIFUSION_SIGMA_PX)
+        denominador = ndimage.gaussian_filter(denominador, _DIFUSION_SIGMA_PX)
+    extendido = np.divide(
+        numerador, denominador, out=np.zeros_like(numerador), where=denominador > 1e-9
+    )
+    return np.where(valido, valores, extendido)
 
 
 def generar_malla_profundidad(
@@ -415,8 +354,6 @@ def generar_malla_profundidad(
     Devuelve ``{"parametros_registro": {...}}`` con los parámetros de altura
     usados (y las medidas finales).
     """
-    import manifold3d as m3d
-
     if not math.isfinite(largo_mm) or largo_mm <= 0:
         raise ProfundidadError(f'"largo_mm" debe ser mayor que 0; recibido "{largo_mm}".')
     if not math.isfinite(grosor_mm) or grosor_mm <= 0:
@@ -433,9 +370,15 @@ def generar_malla_profundidad(
     ancho_min_mm = float(datos_profundidad["ancho_min_mm"])
     engrose_mm = float(datos_profundidad["engrose_mm"])
     mm_por_px = float(datos_profundidad["mm_por_px"])
+    tolerancia_mm = float(datos_profundidad["tolerancia_mm"])
+    caras_max = int(round(float(datos_profundidad["caras_max"])))
 
     if mm_por_px <= 0:
         raise ProfundidadError(f'"mm_por_px" debe ser mayor que 0; recibido "{mm_por_px}".')
+    if tolerancia_mm <= 0:
+        raise ProfundidadError(f'"tolerancia_mm" debe ser mayor que 0; recibido "{tolerancia_mm}".')
+    if caras_max <= 0:
+        raise ProfundidadError(f'"caras_max" debe ser mayor que 0; recibido "{caras_max}".')
     if borde_mm <= 0:
         raise ProfundidadError(f'"borde_mm" debe ser mayor que 0; recibido "{borde_mm}".')
     if borde_mm >= grosor_mm:
@@ -562,11 +505,11 @@ def generar_malla_profundidad(
     factor = alto_disponible_mm / pico
     alto = borde_mm + contrib * factor
 
-    # Fuera de la figura (en el margen que se usa para la pared), se extiende por
-    # vecino más cercano: así la pared no cae a 0 donde el contorno final (algo
-    # más amplio que la figura estricta) la recorte.
-    _, (iy, ix) = ndimage.distance_transform_edt(~figura_f, return_indices=True)
-    alto_extendido = np.where(figura_f, alto, alto[iy, ix])
+    # Fuera de la figura (en el margen que se usa para la pared), se extiende con un
+    # difusor (ver _extender_suave): así la pared no cae a 0 donde el contorno final
+    # (algo más amplio que la figura estricta) la recorte, y la extensión es continua
+    # con el interior (sin los escalones de un vecino más cercano puro).
+    alto_extendido = _extender_suave(figura_f, alto)
     alto_extendido = np.clip(alto_extendido, borde_mm, grosor_mm)
 
     # Se suma aquí la base sacrificable (en vez de extruirla por separado y
@@ -575,38 +518,69 @@ def generar_malla_profundidad(
     # de grosor cero en la costura entre ambos sólidos.
     alto_con_base = alto_extendido + CORTE_SACRIFICABLE_MM
 
-    # Región del campo de alturas: bastante más ancha que la figura ensanchada,
-    # para que la pared nunca se corte contra una zona sin datos.
-    campo = ndimage.binary_dilation(figura_ancha, iterations=_MARGEN_CAMPO_PX)
-    malla_campo = _malla_campo_alturas(campo, alto_con_base, mm_por_px)
-
     # Contorno final: la máscara ensanchada, trazada como polígono suavizado
     # (no por celdas de píxel).
     contorno_cs = _trazar_contorno(figura_ancha, mm_por_px)
     if contorno_cs is None:
         raise ProfundidadError("No se pudo trazar el contorno de la figura.")
 
-    solido_campo = m3d.Manifold(
-        m3d.Mesh(
-            vert_properties=malla_campo.vertices.astype(np.float32),
-            tri_verts=malla_campo.faces.astype(np.uint32),
-        )
-    )
-    if solido_campo.status() != m3d.Error.NoError:
-        raise ProfundidadError(
-            f"El campo de alturas no es una malla válida para manifold3d ({solido_campo.status()})."
+    # Pared sin escalones y SIN intersección 3D (CSG) con el campo de alturas: una
+    # intersección (`Manifold.batch_boolean(..., Intersect)`) entre una rejilla muy
+    # regular (el campo de alturas, por vértice/píxel) y un polígono con cientos de
+    # segmentos es, en la práctica, poco fiable incluso con el jitter de las rondas
+    # anteriores — manifold3d (CSG robusto en float32) "engancha" buena parte del
+    # corte a los ejes de la rejilla en vez de seguir el polígono (se midió hasta un
+    # 52% de los vértices de la pared cayendo justo sobre la rejilla de 0,2 mm, cuando
+    # al azar debería ser ~10%), dejando escalones en planta ("planchas" a distinta
+    # profundidad) y una cresta en el borde superior ("ceja") — ver #56, ronda 2.
+    #
+    # En vez de eso: se extruye el contorno a una altura unitaria (1.0, un prisma
+    # recto normal), se subdivide (`refine_to_length`) a la resolución de trabajo para
+    # tener suficientes vértices en XY y en Z, y se comba cada vértice con
+    # `warp_batch` multiplicando su z (0..1) por la altura real en ese punto
+    # (`alto_con_base`, interpolada bilinealmente). `warp_batch` solo MUEVE vértices
+    # (no hace CSG): la base queda en z=0 para toda la huella (z=0 · altura = 0), el
+    # techo seda la altura exacta (z=1 · altura = altura) y, como x/y no se tocan, la
+    # pared queda exactamente en el contorno (sin "enganches" a ninguna rejilla).
+    filas_campo, columnas_campo = alto_con_base.shape
+
+    def _alturas_en(puntos_xy: np.ndarray) -> np.ndarray:
+        columnas = puntos_xy[:, 0] / mm_por_px
+        filas_idx = filas_campo + 4 - puntos_xy[:, 1] / mm_por_px
+        return ndimage.map_coordinates(
+            alto_con_base, [filas_idx, columnas], order=1, mode="nearest"
         )
 
-    # El prisma del contorno cubre de sobra el rango de alturas del campo: solo
-    # recorta la silueta en planta (la "pared"), nunca limita el alto.
-    margen_z = max(grosor_mm, 1.0)
-    altura_prisma = grosor_mm + CORTE_SACRIFICABLE_MM + 2 * margen_z
-    prisma = contorno_cs.extrude(altura_prisma).translate((0.0, 0.0, -margen_z))
+    def _combar(puntos: np.ndarray) -> np.ndarray:
+        resultado = puntos.copy()
+        resultado[:, 2] = puntos[:, 2] * _alturas_en(puntos[:, :2])
+        return resultado
 
-    solido = m3d.Manifold.batch_boolean([solido_campo, prisma], m3d.OpType.Intersect)
+    prisma_unitario = contorno_cs.extrude(1.0)
+    prisma_fino = prisma_unitario.refine_to_length(mm_por_px)
+    solido = prisma_fino.warp_batch(_combar)
     if solido.is_empty():
+        raise ProfundidadError("El contorno no produjo geometría.")
+
+    # Menos caras sin perder los motivos: Manifold.simplify mueve cada superficie menos
+    # que la tolerancia dada, así que una tolerancia pequeña colapsa sobre todo las zonas
+    # casi planas (fondo, paredes) y conserva el detalle real. Si no alcanza para bajar de
+    # caras_max (imagen muy grande o mm_por_px muy fino), se sube la tolerancia e intenta
+    # de nuevo, en vez de fallar directamente.
+    tolerancia_actual = tolerancia_mm
+    for _ in range(_INTENTOS_SIMPLIFICAR):
+        solido_simple = solido.simplify(tolerancia_actual)
+        if solido_simple.num_tri() <= caras_max:
+            solido = solido_simple
+            break
+        tolerancia_actual *= _FACTOR_SIMPLIFICAR
+    else:
+        solido = solido_simple
+    if solido.num_tri() > caras_max:
         raise ProfundidadError(
-            "La intersección del campo de alturas con el contorno no produjo geometría."
+            f"La malla de profundidad tiene {solido.num_tri()} caras tras simplificar "
+            f"(con tolerancia hasta {tolerancia_actual:.3f} mm), por encima de caras_max "
+            f"({caras_max}). Sube caras_max o mm_por_px en profundidad.toml."
         )
 
     malla_m3d = solido.to_mesh()
@@ -634,6 +608,8 @@ def generar_malla_profundidad(
         "ancho_min_mm": ancho_min_mm,
         "engrose_mm": engrose_mm,
         "mm_por_px": mm_por_px,
+        "tolerancia_mm": tolerancia_mm,
+        "caras_max": caras_max,
         "largo_mm": float(largo_mm),
         "grosor_mm": float(grosor_mm),
     }

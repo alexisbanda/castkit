@@ -521,8 +521,11 @@ borde de la figura) y `grosor_mm` del diseño es el máximo; entre ambos se repa
 Como en `relieve`, se añaden 0,5 mm de base sacrificable que `castkit limpieza` recorta, dejando
 la espalda plana y el grosor exacto. La huella en planta sale de trazar el contorno como un
 polígono suavizado (no por celdas de píxel): la pared queda lisa y el borde superior, interpolado
-del campo de alturas, sin escalones. La etapa `generacion` registra el modelo, la `revision`, el
-`sha256` de la imagen y de `profundidad.toml`, los parámetros usados y los segundos de cálculo.
+del campo de alturas, sin escalones (el campo se extiende fuera de la figura con un difusor, no
+con un vecino más cercano, para que esa extensión no deje escalones ni una cresta en la pared). La
+malla final se simplifica con `tolerancia_mm` para no pasar de `caras_max` caras. La etapa
+`generacion` registra el modelo, la `revision`, el `sha256` de la imagen y de `profundidad.toml`,
+los parámetros usados y los segundos de cálculo.
 
 ### Opciones de `castkit generar`
 
@@ -596,6 +599,8 @@ suavizado = 0.6
 ancho_min_mm = 2.5
 engrose_mm = 0.6
 mm_por_px = 0.2
+tolerancia_mm = 0.03
+caras_max = 120000
 ```
 
 - `modelo`: único modelo admitido (licencia Apache-2.0); las variantes Base y Large (licencia
@@ -611,6 +616,12 @@ mm_por_px = 0.2
 - `engrose_mm`: milímetros que se ensancha, por lado, cada parte más estrecha que `ancho_min_mm`.
 - `mm_por_px`: resolución de trabajo (mm por píxel) del campo de alturas; no es la resolución de
   la imagen de entrada, sino la de la malla (más fino = más detalle y más memoria/tiempo).
+- `tolerancia_mm`: tolerancia (mm) con la que se simplifica la malla final (`Manifold.simplify`):
+  ninguna superficie se mueve más que esto. Si no basta para bajar de `caras_max`, se sube
+  automáticamente (hasta 8 veces) antes de generar.
+- `caras_max`: número máximo de caras de la malla en bruto (antes de `castkit limpieza`). Si
+  `tolerancia_mm` no alcanza para bajar de este límite, se sube automáticamente; si aun así no
+  alcanza, la generación falla (sube `caras_max` o reduce `mm_por_px`).
 
 Estos mismos valores se guardan también, ya resueltos, en cada `brief/profundidad.toml` (ver
 arriba).

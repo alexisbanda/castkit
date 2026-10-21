@@ -44,6 +44,8 @@ _OPCIONALES_PROFUNDIDAD = {
     "ancho_min_mm": 2.5,
     "engrose_mm": 0.6,
     "mm_por_px": 0.2,
+    "tolerancia_mm": 0.03,
+    "caras_max": 120000,
 }
 
 # src/castkit/config.py -> src/castkit -> src -> raíz del repositorio.
@@ -149,8 +151,9 @@ def cargar_config_profundidad() -> dict[str, Any]:
     """Carga la sección `[profundidad]` de `config/fabricacion.toml`.
 
     Devuelve un `dict` con `modelo`, `revision`, `borde_mm`, `realce_mm`,
-    `suavizado`, `ancho_min_mm`, `engrose_mm` y `mm_por_px`. Todas las claves
-    son opcionales (si la sección falta o está incompleta, se usan los valores
-    por defecto del proveedor «profundidad», ver #56).
+    `suavizado`, `ancho_min_mm`, `engrose_mm`, `mm_por_px`, `tolerancia_mm` y
+    `caras_max`. Todas las claves son opcionales (si la sección falta o está
+    incompleta, se usan los valores por defecto del proveedor «profundidad»,
+    ver #56).
     """
     return _cargar_seccion("profundidad", (), opcionales=_OPCIONALES_PROFUNDIDAD)
