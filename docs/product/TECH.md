@@ -11,7 +11,8 @@
 - trimesh, manifold3d y fast-simplification para el procesamiento, limpieza y validación de mallas.
 - Blender LTS en modo headless (scripts `bpy`), **obligatorio para los puntos de control**: renderiza las 4 vistas del punto de control 1 con el motor `CYCLES` en CPU y también se usa como remallado de respaldo en `castkit limpieza`, invocado como subproceso (`blender --background --python …`); el ejecutable se toma de `BLENDER_BIN` o del PATH. No existe ningún motor de respaldo para los renders: si Blender falla o no está disponible, el punto de control falla con un error explícito.
 - Arquitectura de **proveedor enchufable** (protocolo/interfaz en Python configurable en `config/fabricacion.toml`) para la generación de mallas 3D a partir de imágenes, documentos (`.pdf`, `.ai`) o prompts de texto.
-- scikit-image (BSD-3) para el proveedor local `relieve` (bajorrelieve por capas de color): traza los contornos de cada nivel de altura con `skimage.measure.find_contours`.
+- scikit-image (BSD-3) para los proveedores locales `relieve` (bajorrelieve por capas de color) y `profundidad` (media figura): trazan los contornos con `skimage.measure.find_contours`.
+- torch y transformers (extra opcional `profundidad`, no instalado por defecto) para el proveedor local `profundidad`: mapa de profundidad en CPU con Depth Anything V2 Small (Apache-2.0; las variantes Base/Large son CC-BY-NC y se rechazan).
 - Sin base de datos: los diseños viven como carpetas con archivos.
 
 ## Arquitectura

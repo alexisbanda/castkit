@@ -15,6 +15,16 @@ dependencies = [
     "scikit-image>=0.25",
 ]
 
+[project.optional-dependencies]
+# Proveedor local "profundidad" (#56): mapa de profundidad con Depth Anything
+# V2 Small (Apache-2.0), en CPU. Opcional para no cargar PyTorch a quien no
+# lo use: sin este extra, el proveedor falla con un mensaje que explica cómo
+# instalarlo (ver castkit.generacion.ProveedorProfundidad).
+profundidad = [
+    "torch>=2.2",
+    "transformers>=4.40",
+]
+
 [project.scripts]
 castkit = "castkit.cli:main"
 
@@ -27,6 +37,17 @@ dev = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.uv.sources]
+# PyTorch no publica ruedas para CPU en PyPI en todas las plataformas; se usa
+# el índice oficial de PyTorch solo para `torch`, y solo fuera de macOS
+# (donde las ruedas de PyPI ya son para CPU/Metal).
+torch = [{ index = "pytorch-cpu", marker = "sys_platform != 'darwin'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/castkit"]

@@ -27,14 +27,19 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
 import trimesh
 
-from castkit import relieve
-from castkit.config import cargar_config_generacion, cargar_config_relieve
+from castkit import profundidad, relieve
+from castkit.config import (
+    cargar_config_generacion,
+    cargar_config_profundidad,
+    cargar_config_relieve,
+)
 from castkit.ingesta import IngestaError, sha256_archivo, validar_malla
 from castkit.versiones import (
     VersionError,
@@ -541,6 +546,117 @@ class ProveedorRelieve:
         }
 
 
+class ProveedorProfundidad:
+    """Proveedor local: media figura por profundidad para molde abierto (#56).
+
+    Usa la primera imagen del brief y un archivo ``profundidad.toml`` junto a
+    ella (lo escribe con los valores de ``[profundidad]`` si no existe; ver
+    :mod:`castkit.profundidad`). Es, por construcción, un molde abierto (#55):
+    la versión actual del diseño necesita ``tipo_molde == "abierto"`` con
+    ``largo_mm`` y ``grosor_mm``. :func:`generar_malla` llama a
+    :meth:`usar_version` con esos datos antes de invocar :meth:`generar`.
+
+    ``estimar_profundidad`` se puede inyectar (para los tests, sin PyTorch);
+    por defecto es :func:`castkit.profundidad.estimar_profundidad`, que
+    importa ``torch``/``transformers`` de forma perezosa y lanza
+    :class:`castkit.profundidad.ExtraNoInstaladoError` si el extra opcional
+    ``profundidad`` no está instalado.
+    """
+
+    def __init__(
+        self,
+        config: dict[str, Any] | None = None,
+        *,
+        estimar_profundidad: Callable[[Path, str, str], Any] | None = None,
+    ) -> None:
+        cfg = config or {}
+        self._modelo = str(cfg.get("modelo", profundidad.MODELO_PERMITIDO))
+        self._revision = str(cfg.get("revision", ""))
+        try:
+            profundidad._validar_modelo(self._modelo)
+        except profundidad.ProfundidadError as exc:
+            raise GeneracionError(str(exc)) from exc
+
+        self._config_alturas: dict[str, Any] = {
+            clave: (float(cfg[clave]) if clave in cfg else None)
+            for clave in profundidad.CLAVES_PROFUNDIDAD
+        }
+        faltantes = [clave for clave, valor in self._config_alturas.items() if valor is None]
+        if faltantes:
+            raise GeneracionError(
+                f'A la configuración del proveedor "profundidad" le faltan estas claves: '
+                f"{', '.join(faltantes)}."
+            )
+
+        self._estimar_profundidad = estimar_profundidad or profundidad.estimar_profundidad
+        self._info_version: dict[str, Any] = {}
+        self.parametros_registro: dict[str, Any] = {}
+
+    def usar_version(self, info_version: dict[str, Any]) -> None:
+        """Recibe los datos de :func:`castkit.versiones.datos_version` de la versión actual."""
+        self._info_version = dict(info_version)
+
+    def generar(self, insumos: InsumosBrief, destino_stl: Path) -> None:
+        if not insumos.imagenes:
+            raise GeneracionError(
+                'El proveedor "profundidad" requiere al menos una imagen (.png, .jpg, .webp) en '
+                "la carpeta brief/ (la vista frontal de la figura)."
+            )
+
+        tipo_molde = self._info_version.get("tipo_molde", "completo")
+        largo_mm = self._info_version.get("largo_mm")
+        grosor_mm = self._info_version.get("grosor_mm")
+        if tipo_molde != "abierto" or largo_mm is None or grosor_mm is None:
+            raise GeneracionError(
+                'El proveedor "profundidad" construye una media figura de espalda plana, que es '
+                "un molde abierto (#55): la versión actual necesita --tipo-molde abierto, "
+                "--largo-mm y --grosor-mm. Por ejemplo: "
+                '"castkit version <diseño> --motivo <...> --tipo-molde abierto '
+                '--largo-mm <mm> --grosor-mm <mm>" (o --tipo-molde abierto/--largo-mm/'
+                f'--grosor-mm en "castkit alta"). Tipo de molde actual: "{tipo_molde}", '
+                f"largo_mm={largo_mm}, grosor_mm={grosor_mm}."
+            )
+
+        ruta_imagen = insumos.imagenes[0]
+        ruta_toml = ruta_imagen.parent / profundidad.NOMBRE_TOML
+
+        try:
+            if not ruta_toml.is_file():
+                profundidad.escribir_profundidad_toml(ruta_toml, self._config_alturas)
+                print(
+                    f'"profundidad": se escribió "{ruta_toml}" con los valores de [profundidad] '
+                    f"de config/fabricacion.toml. Edítalo y vuelve a generar con --reemplazar "
+                    "para ajustarlo."
+                )
+                datos_alturas = self._config_alturas
+            else:
+                datos_alturas = profundidad.leer_profundidad_toml(ruta_toml)
+
+            inicio = time.monotonic()
+            mapa = self._estimar_profundidad(ruta_imagen, self._modelo, self._revision)
+            segundos_calculo = time.monotonic() - inicio
+
+            resultado = profundidad.generar_malla_profundidad(
+                ruta_imagen,
+                mapa,
+                datos_alturas,
+                largo_mm=float(largo_mm),
+                grosor_mm=float(grosor_mm),
+                destino_stl=destino_stl,
+            )
+        except profundidad.ProfundidadError as exc:
+            raise GeneracionError(str(exc)) from exc
+
+        self.parametros_registro = {
+            **resultado["parametros_registro"],
+            "modelo": self._modelo,
+            "revision": self._revision,
+            "imagen_sha256": sha256_archivo(ruta_imagen),
+            "profundidad_toml_sha256": sha256_archivo(ruta_toml),
+            "segundos_calculo": round(segundos_calculo, 3),
+        }
+
+
 def _partir_comando(comando: str, posix: bool = os.name != "nt") -> list[str]:
     """Separa `comando` en argumentos respetando las rutas de Windows.
 
@@ -645,6 +761,8 @@ def obtener_proveedor(
         return ProveedorImagen3D()
     if nombre == "relieve":
         return ProveedorRelieve(cargar_config_relieve())
+    if nombre == "profundidad":
+        return ProveedorProfundidad(cargar_config_profundidad())
     if nombre == "tripo3d":
         cfg = config_generacion or {}
         return ProveedorTripo3D(
@@ -653,7 +771,14 @@ def obtener_proveedor(
         )
 
     disponibles = sorted(
-        {"comando", "imagen-3d", "relieve", "tripo3d", *_PROVEEDORES_REGISTRADOS.keys()}
+        {
+            "comando",
+            "imagen-3d",
+            "relieve",
+            "profundidad",
+            "tripo3d",
+            *_PROVEEDORES_REGISTRADOS.keys(),
+        }
     )
     raise GeneracionError(
         f'El proveedor de generación 3D "{nombre}" no está registrado. '

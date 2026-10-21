@@ -13,8 +13,9 @@ Castkit — Agent-assisted pipeline that turns 3D models into production-ready m
 - **manifold3d**: construye los sólidos de fabricación (la resta booleana del canal de mecha, la matriz en modo figura o cubeta multicavidad).
 - **Blender** (proceso externo, headless): renderiza las 4 vistas del punto de control 1 (motor `CYCLES` en CPU) y, como respaldo, remalla por vóxeles cuando `castkit limpieza` no logra cerrar la malla en Python.
 - **Pillow**: sobreimprime la vista y las medidas en mm sobre cada PNG del punto de control 1.
-- **numpy** y **scipy**: apoyan al proveedor local `imagen-3d` (segmentación, transformada de distancia y suavizado para reconstruir un volumen 3D desde una imagen 2D) y al proveedor local `relieve` (separar el fondo, componentes conexas, dilatación de la placa).
-- **scikit-image**: traza los contornos de cada nivel de altura del proveedor local `relieve` (`skimage.measure.find_contours`).
+- **numpy** y **scipy**: apoyan al proveedor local `imagen-3d` (segmentación, transformada de distancia y suavizado para reconstruir un volumen 3D desde una imagen 2D), al proveedor local `relieve` (separar el fondo, componentes conexas, dilatación de la placa) y al proveedor local `profundidad` (máscara, partes finas, campo de alturas).
+- **scikit-image**: traza los contornos de cada nivel de altura de los proveedores locales `relieve` y `profundidad` (`skimage.measure.find_contours`).
+- **torch** y **transformers** (extra opcional `profundidad`, ver abajo): calculan el mapa de profundidad (Depth Anything V2 Small) del proveedor local `profundidad`. No se instalan por defecto; sin ellas, el resto de castkit funciona igual.
 
 ## Instalación
 
@@ -25,6 +26,20 @@ uv sync
 Esto instala Python 3.12 (si falta) y todas las dependencias del proyecto, incluidas las de
 desarrollo (pytest, ruff), según lo declarado en [`pyproject.toml`](pyproject.toml) y fijado en
 `uv.lock`.
+
+### Extra opcional `profundidad` (proveedor de generación 3D)
+
+El proveedor local `profundidad` (ver más abajo) necesita PyTorch y `transformers`, que **no**
+se instalan por defecto (para no cargar PyTorch a quien no lo usa):
+
+```bash
+uv sync --extra profundidad
+```
+
+`pyproject.toml` fija un índice adicional (`pytorch-cpu`, solo para el paquete `torch`, y solo
+fuera de macOS, donde las ruedas de PyPI ya son para CPU) para instalar la rueda de PyTorch para
+CPU en vez de la variante con CUDA. Sin este extra instalado, el resto de castkit funciona igual
+y `castkit generar --proveedor profundidad` termina con un mensaje que explica cómo instalarlo.
 
 ## Tests
 
@@ -416,6 +431,7 @@ Los `.pdf` y `.ai` del brief solo los recibe el proveedor `comando` (vía la var
 | `comando` | todos los insumos (imágenes, `.pdf`/`.ai`, prompt); se los pasa a un comando externo | `comando` en `[generacion]`; si está vacío y hay imágenes, recurre a `imagen-3d` |
 | `imagen-3d` | solo la primera imagen (reconstructor volumétrico local, sin red) | nada (no necesita claves de API) |
 | `relieve` | solo la primera imagen (bajorrelieve local por capas de color, sin red) | molde abierto: `--tipo-molde abierto --largo-mm <mm> --grosor-mm <mm>` (ver abajo) |
+| `profundidad` | solo la primera imagen (media figura local por mapa de profundidad, sin red) | molde abierto (igual que `relieve`) y el extra opcional `profundidad` (`uv sync --extra profundidad`) |
 | `tripo3d` | la primera imagen (Imagen→3D) o, si no hay imágenes, el prompt (Texto→3D), vía la API v3 de Tripo | variable de entorno `TRIPO_API_KEY` |
 
 El proveedor `tripo3d` pide solo geometría (sin texturas ni PBR), registra `tripo_modelo` y
@@ -462,12 +478,61 @@ se limita al nivel más bajo del diseño; si se indica `placa_mm` > 0 en `reliev
 diseño se apoya en una placa (con la silueta conjunta ampliada `placa_margen_mm`) y la malla
 queda en un solo cuerpo.
 
+#### Proveedor `profundidad`: media figura para molde abierto desde una imagen frontal
+
+`profundidad` reconstruye la media figura de un molde abierto (espalda plana) a partir de una
+imagen frontal: un mapa de profundidad local da las formas grandes (cara, manos, cuerpo) y el
+sombreado de la propia imagen realza los motivos finos que la profundidad por sí sola suaviza.
+Es, igual que `relieve`, un **molde abierto**: la versión actual necesita `--tipo-molde abierto`,
+`--largo-mm` y `--grosor-mm`; si el diseño es `completo` o no tiene `grosor_mm`,
+`castkit generar --proveedor profundidad` termina con un mensaje que explica qué poner.
+
+Necesita el extra opcional `profundidad` (`uv sync --extra profundidad`, ver «Instalación»): sin
+él instalado, el resto de castkit funciona igual y el comando termina con un mensaje en español
+que explica cómo instalarlo:
+
+```
+El proveedor profundidad necesita el extra opcional: uv sync --extra profundidad
+```
+
+```bash
+uv sync --extra profundidad
+uv run castkit alta guagua --brief ./brief-guagua --material cera \
+  --tipo-molde abierto --largo-mm 100 --cavidades 1 --cantidad 10 --fecha 2026-12-01 \
+  --licencia propio --origen "ilustración propia"
+uv run castkit version guagua --motivo "grosor de la media figura" --grosor-mm 20
+uv run castkit generar guagua --proveedor profundidad
+```
+
+El modelo de profundidad es **Depth Anything V2 Small** (`depth-anything/Depth-Anything-V2-Small-hf`,
+licencia Apache-2.0, uso comercial permitido) fijado por `revision` (el commit del modelo en
+Hugging Face). Las variantes Base y Large del mismo modelo (y cualquier otro) tienen licencia
+CC-BY-NC (solo uso no comercial) y `config/fabricacion.toml` los rechaza con un mensaje que
+explica la licencia; `modelo` y `revision` no se pueden cambiar a otro modelo.
+
+En la primera generación, calcula el mapa de profundidad en CPU (unos 30 s por imagen) y escribe
+los valores de altura de `[profundidad]` en `brief/profundidad.toml`. El operador edita ese
+archivo y vuelve a generar con `--reemplazar` para ajustarlo: `borde_mm` es la altura mínima (el
+borde de la figura) y `grosor_mm` del diseño es el máximo; entre ambos se reparten la forma
+(profundidad, normalizada por percentiles) y `realce_mm` del realce del sombreado. `suavizado`
+(sigma, en píxeles de la resolución de trabajo) suaviza el campo de alturas; `ancho_min_mm` y
+`engrose_mm` ensanchan las partes más finas que esa medida (para que no desaparezcan al moldear);
+`mm_por_px` fija la resolución de trabajo del campo de alturas (no la de la imagen de entrada).
+Como en `relieve`, se añaden 0,5 mm de base sacrificable que `castkit limpieza` recorta, dejando
+la espalda plana y el grosor exacto. La huella en planta sale de trazar el contorno como un
+polígono suavizado (no por celdas de píxel): la pared queda lisa y el borde superior, interpolado
+del campo de alturas, sin escalones (el campo se extiende fuera de la figura con un difusor, no
+con un vecino más cercano, para que esa extensión no deje escalones ni una cresta en la pared). La
+malla final se simplifica con `tolerancia_mm` para no pasar de `caras_max` caras. La etapa
+`generacion` registra el modelo, la `revision`, el `sha256` de la imagen y de `profundidad.toml`,
+los parámetros usados y los segundos de cálculo.
+
 ### Opciones de `castkit generar`
 
 | Opción | Obligatoria | Valores aceptados |
 | --- | --- | --- |
 | `nombre` (posicional) | sí | nombre de un diseño ya dado de alta |
-| `--proveedor` | no | `comando`, `imagen-3d`, `relieve`, `tripo3d`, o un proveedor registrado en tiempo de ejecución (si se omite, se usa `config/fabricacion.toml`) |
+| `--proveedor` | no | `comando`, `imagen-3d`, `relieve`, `profundidad`, `tripo3d`, o un proveedor registrado en tiempo de ejecución (si se omite, se usa `config/fabricacion.toml`) |
 | `--prompt` | no | texto o prompt de contexto adicional para el generador 3D |
 | `--reemplazar` | no | reemplaza sin preguntar la malla ya guardada en la versión actual, si existe |
 
@@ -518,6 +583,48 @@ placa_margen_mm = 1.0
 
 Estos mismos valores (salvo `colores_max`, que solo se usa al proponer) se guardan también, ya
 resueltos, en cada `brief/relieve.toml` (ver arriba).
+
+### `[profundidad]` en `config/fabricacion.toml`
+
+Valores por defecto que el proveedor `profundidad` copia a un `brief/profundidad.toml` nuevo
+(ver arriba):
+
+```toml
+[profundidad]
+modelo = "depth-anything/Depth-Anything-V2-Small-hf"
+revision = "5426e4f0f36572d16453bbda7a8389317b1bef99"
+borde_mm = 4.0
+realce_mm = 1.2
+suavizado = 0.6
+ancho_min_mm = 2.5
+engrose_mm = 0.6
+mm_por_px = 0.2
+tolerancia_mm = 0.03
+caras_max = 120000
+```
+
+- `modelo`: único modelo admitido (licencia Apache-2.0); las variantes Base y Large (licencia
+  CC-BY-NC, no comercial) se rechazan con un mensaje que explica por qué.
+- `revision`: revisión (commit) fija del modelo en Hugging Face.
+- `borde_mm`: altura (mm) del punto más bajo de la figura (el borde); `grosor_mm` del diseño es
+  el máximo.
+- `realce_mm`: milímetros, entre `borde_mm` y `grosor_mm`, dedicados a realzar los motivos finos
+  a partir del sombreado de la imagen.
+- `suavizado`: sigma (en píxeles de la resolución de trabajo) del suavizado gaussiano del campo
+  de alturas.
+- `ancho_min_mm`: partes de la figura más estrechas que esto (mm) se ensanchan (ver `engrose_mm`).
+- `engrose_mm`: milímetros que se ensancha, por lado, cada parte más estrecha que `ancho_min_mm`.
+- `mm_por_px`: resolución de trabajo (mm por píxel) del campo de alturas; no es la resolución de
+  la imagen de entrada, sino la de la malla (más fino = más detalle y más memoria/tiempo).
+- `tolerancia_mm`: tolerancia (mm) con la que se simplifica la malla final (`Manifold.simplify`):
+  ninguna superficie se mueve más que esto. Si no basta para bajar de `caras_max`, se sube
+  automáticamente (hasta 8 veces) antes de generar.
+- `caras_max`: número máximo de caras de la malla en bruto (antes de `castkit limpieza`). Si
+  `tolerancia_mm` no alcanza para bajar de este límite, se sube automáticamente; si aun así no
+  alcanza, la generación falla (sube `caras_max` o reduce `mm_por_px`).
+
+Estos mismos valores se guardan también, ya resueltos, en cada `brief/profundidad.toml` (ver
+arriba).
 
 ## Punto de control 1: renders de las 4 vistas y aprobación (`castkit control1`)
 
