@@ -417,13 +417,17 @@ def generar_malla_relieve(
         raise RelieveError("La figura detectada no tiene extensión; no se puede escalar en planta.")
     mm_por_px = largo_mm / extension_px
 
-    pico_relativo = float(alturas_px[figura].max())
-    factor_altura = alto_disponible_mm / pico_relativo
-
     niveles = sorted({float(v) for v in np.unique(alturas_px[figura])})
 
-    solido_relieve = None
-    z_prev_rel = 0.0
+    # Primera pasada: construye la sección de cada nivel (con su cierre
+    # morfológico y, desde el segundo nivel, la contracción `escalon_mm·k`)
+    # SIN escalar alturas todavía. Algunos niveles pueden no sobrevivir
+    # (manchas menores que `area_min_mm2`, o que la contracción deja vacías):
+    # `pico_relativo` se calcula sobre el nivel más alto que SÍ sobrevive,
+    # no sobre el máximo nominal de `relieve.toml` (si se usara el nominal,
+    # un color alto descartado comprimiría todo lo demás por debajo de
+    # `grosor_mm`).
+    secciones: list[tuple[float, Any]] = []
     for k, h in enumerate(niveles):
         mascara_nivel = alturas_px >= (h - 1e-9)
         cs = _seccion_mm(mascara_nivel, mm_por_px, area_min_mm2)
@@ -432,18 +436,42 @@ def generar_malla_relieve(
             cs = cs.offset(-contraccion, m3d.JoinType.Miter).simplify(_CIERRE_MM)
             partes = [parte for parte in cs.decompose() if parte.area() >= area_min_mm2]
             cs = m3d.CrossSection.batch_boolean(partes, m3d.OpType.Add) if partes else None
-        if cs is not None and not cs.is_empty():
-            z0_mm = z_prev_rel * factor_altura
-            z1_mm = h * factor_altura
-            capa = cs.extrude(z1_mm - z0_mm).translate((0.0, 0.0, z0_mm))
-            solido_relieve = capa if solido_relieve is None else solido_relieve + capa
-        z_prev_rel = h
+        secciones.append((h, cs if (cs is not None and not cs.is_empty()) else None))
 
-    if solido_relieve is None:
+    niveles_construidos = [h for h, cs in secciones if cs is not None]
+    if not niveles_construidos:
         raise RelieveError(
             "El relieve no produjo ninguna geometría visible; revisa colores_max y "
             "area_min_mm2 en relieve.toml (puede que todas las regiones se hayan descartado)."
         )
+    pico_relativo = max(niveles_construidos)
+    factor_altura = alto_disponible_mm / pico_relativo
+
+    # Avisa (sin fallar) de qué colores de relieve.toml no llegaron a
+    # construirse, para que el operador no los vea desaparecer en silencio.
+    colores_sin_construir: list[dict[str, Any]] = []
+    for idx_color, color in enumerate(colores):
+        valores_color = np.unique(alturas_px[(clase == idx_color) & figura])
+        if valores_color.size == 0:
+            continue  # el color no tiene ningún píxel en la figura (p. ej. solo en el fondo).
+        altura_efectiva = float(valores_color.max())
+        if not any(math.isclose(altura_efectiva, h, abs_tol=1e-6) for h in niveles_construidos):
+            colores_sin_construir.append(dict(color))
+
+    # Cada capa debe apoyar en la cima del último nivel CONSTRUIDO (o en z=0),
+    # nunca en la de un nivel descartado: si se actualizara `z_prev_rel` aunque
+    # `cs` sea None, un nivel intermedio descartado dejaría un hueco entre la
+    # capa de abajo y la siguiente que sí se construye (malla no conexa o con
+    # un hueco flotante).
+    solido_relieve = None
+    z_prev_rel = 0.0
+    for h, cs in secciones:
+        if cs is not None:
+            z0_mm = z_prev_rel * factor_altura
+            z1_mm = h * factor_altura
+            capa = cs.extrude(z1_mm - z0_mm).translate((0.0, 0.0, z0_mm))
+            solido_relieve = capa if solido_relieve is None else solido_relieve + capa
+            z_prev_rel = h
 
     if placa_mm > 0:
         margen_px = max(placa_margen_mm / mm_por_px, 0.0)
@@ -489,5 +517,6 @@ def generar_malla_relieve(
         "largo_mm": float(largo_mm),
         "grosor_mm": float(grosor_mm),
         "mm_por_px": mm_por_px,
+        "colores_sin_construir": colores_sin_construir,
     }
     return {"parametros_registro": parametros_registro}

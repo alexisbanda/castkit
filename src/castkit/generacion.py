@@ -522,6 +522,18 @@ class ProveedorRelieve:
         except relieve.RelieveError as exc:
             raise GeneracionError(str(exc)) from exc
 
+        colores_sin_construir = resultado["parametros_registro"].get("colores_sin_construir") or []
+        if colores_sin_construir:
+            descripcion = ", ".join(
+                f"{c['hex']} (altura_mm={c['altura_mm']})" for c in colores_sin_construir
+            )
+            print(
+                f'Aviso: el proveedor "relieve" no construyó estos colores de "{ruta_toml}" '
+                f"(sus manchas quedaron por debajo de area_min_mm2, o se perdieron al contraer "
+                f"escalon_mm): {descripcion}. Revisa esos valores en relieve.toml si esperabas "
+                "verlos en el relieve."
+            )
+
         self.parametros_registro = {
             **resultado["parametros_registro"],
             "colores_max": self._config.colores_max,

@@ -62,6 +62,25 @@ def _imagen_con_mancha(ruta: Path) -> None:
     img.save(ruta)
 
 
+_COLOR_PICO_DESCARTADO = (10, 200, 10)
+
+
+def _imagen_con_pico_descartado(ruta: Path) -> None:
+    """Lienzo con A (base) y B (nivel medio), más un color D de un solo píxel
+
+    al que se le propone la altura MÁS ALTA de los tres: su mancha, al ser
+    menor que `area_min_mm2`, se descarta al construir la malla (reproduce
+    el fallo reportado en la revisión: un color alto descartado no debe
+    comprimir el resto de la malla por debajo de `grosor_mm`).
+    """
+    img = Image.new("RGB", (90, 60), _BLANCO)
+    d = ImageDraw.Draw(img)
+    d.rectangle([10, 10, 69, 49], fill=_COLOR_A)
+    d.rectangle([20, 20, 59, 39], fill=_COLOR_B)
+    d.point((30, 25), fill=_COLOR_PICO_DESCARTADO)  # 1 px: se pierde por area_min_mm2
+    img.save(ruta)
+
+
 def _datos_relieve_explicitos(*, placa_mm: float = 0.0, area_min_mm2: float = 0.5) -> dict:
     """`relieve.toml` ya resuelto (sin pasar por `proponer_relieve`), con alturas
     conocidas: A=base, hueco blanco, B y la isla C en terrazas por encima.
@@ -265,6 +284,166 @@ def test_manchas_menores_que_area_min_mm2_se_descartan(tmp_path: Path) -> None:
 
     assert len(cuerpos_defecto) == 1, "con area_min_mm2 por defecto, la mancha se descarta"
     assert len(cuerpos_bajo) == 2, "con area_min_mm2 muy bajo, la mancha aparece como pieza"
+
+
+def test_color_mas_alto_descartado_no_comprime_el_resto_de_la_malla(tmp_path: Path) -> None:
+    """Revisión del orquestador (ronda 1, sobre d8b380c): si el color con la altura
+    nominal más alta de `relieve.toml` no llega a construirse (su mancha es menor
+    que `area_min_mm2`), el grosor final debe seguir siendo `grosor_mm + 0.5` —no
+    comprimirse como si ese color sí se hubiera construido— y el proveedor debe
+    reportarlo en `colores_sin_construir`, no desaparecer en silencio.
+    """
+    ruta_imagen = tmp_path / "logo.png"
+    _imagen_con_pico_descartado(ruta_imagen)
+
+    datos_relieve = {
+        "colores": [
+            {"hex": "#1e3c78", "altura_mm": 2.0},  # A: base
+            {"hex": "#c81e28", "altura_mm": 2.6},  # B: nivel medio
+            {"hex": "#0ac80a", "altura_mm": 3.2},  # D: nominalmente el más alto, 1 px
+        ],
+        "placa_mm": 0.0,
+        "placa_margen_mm": 1.0,
+        "escalon_mm": 0.05,
+        "area_min_mm2": 0.5,
+    }
+
+    destino = tmp_path / "bruto.stl"
+    resultado = relieve.generar_malla_relieve(
+        ruta_imagen, datos_relieve, largo_mm=47.0, grosor_mm=6.0, destino_stl=destino
+    )
+
+    malla = trimesh.load(destino, force="mesh")
+    assert malla.is_watertight
+    assert malla.bounds[0][2] == pytest.approx(0.0, abs=1e-6)
+    assert malla.bounds[1][2] == pytest.approx(6.0 + relieve.CORTE_SACRIFICABLE_MM, abs=0.02), (
+        "el color descartado no debe comprimir el resto del relieve por debajo de grosor_mm"
+    )
+
+    sin_construir = resultado["parametros_registro"]["colores_sin_construir"]
+    assert {c["hex"] for c in sin_construir} == {"#0ac80a"}
+
+
+def test_generar_a_limpieza_con_varios_colores_deja_el_grosor_exacto(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Punta a punta: `castkit generar --proveedor relieve` -> `castkit limpieza`
+    con un diseño de varios colores (incluido uno cuya mancha se descarta) deja
+    la figura en `grosor_mm` exacto, no en una altura comprimida.
+    """
+    carpeta = _crear_diseno_relieve(
+        tmp_path,
+        monkeypatch,
+        largo_mm=47.0,
+        grosor_mm=6.0,
+        constructor_imagen=_imagen_con_pico_descartado,
+    )
+    ruta_toml = carpeta / "brief" / "relieve.toml"
+    relieve.escribir_relieve_toml(
+        ruta_toml,
+        {
+            "colores": [
+                {"hex": "#1e3c78", "altura_mm": 2.0},
+                {"hex": "#c81e28", "altura_mm": 2.6},
+                {"hex": "#0ac80a", "altura_mm": 3.2},
+            ],
+            "placa_mm": 0.0,
+            "placa_margen_mm": 1.0,
+            "escalon_mm": 0.05,
+            "area_min_mm2": 0.5,
+        },
+    )
+
+    generar_malla(carpeta, proveedor="relieve")
+
+    resultado = limpiar_malla(
+        carpeta,
+        arriba=None,
+        caras_max=200000,
+        tolerancia_mm=0.5,
+        corte_base_mm=0.5,
+        agujero_max_mm=10,
+    )
+    malla = trimesh.load(resultado["destino"], force="mesh")
+    assert malla.is_watertight
+    assert malla.bounds[0][2] == pytest.approx(0.0, abs=1e-6)
+    assert float(max(malla.extents[0], malla.extents[1])) == pytest.approx(47.0, abs=0.05)
+    assert float(malla.extents[2]) == pytest.approx(6.0, abs=0.05)
+
+
+def test_nivel_intermedio_descartado_no_deja_un_hueco_bajo_el_nivel_superior(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Revisión del orquestador (ronda 2, sobre d8b380c): si se descarta un
+    nivel INTERMEDIO (B) pero el nivel superior (C) sí sobrevive, la capa de
+    C debe apoyar en la cima del último nivel CONSTRUIDO (A) -- no en la
+    altura nominal de B. El código viejo hacía `z_prev_rel = h` aunque esa
+    capa no se hubiera construido, así que C arrancaba en la altura de B y
+    quedaba flotando sobre un hueco, sin tocar la capa de abajo.
+
+    Por las máscaras acumulativas por altura (`alturas_px >= h`) y la
+    contracción creciente por nivel (`escalon_mm * k`), el propio algoritmo
+    de áreas no puede producir este patrón de forma natural: si el color más
+    alto (C) sobrevive, cualquier nivel inferior (B) que lo incluya en su
+    máscara también sobrevive heredando esa geometría (`niveles_construidos`
+    es siempre un prefijo de los niveles, nunca tiene huecos). Por eso se
+    fuerza aquí el descarte de B con un monkeypatch de `_seccion_mm` (la
+    segunda llamada, correspondiente al nivel intermedio dentro del bucle
+    principal), dejando que A y C se construyan con geometría real: así se
+    blinda la pasada de ensamblado (el bucle que apila las capas) contra este
+    caso límite, aunque hoy no se alcance desde `relieve.toml` + una imagen.
+    """
+    ruta_imagen = tmp_path / "logo.png"
+    img = Image.new("RGB", (120, 60), _BLANCO)
+    d = ImageDraw.Draw(img)
+    d.rectangle([5, 5, 114, 54], fill=_COLOR_A)
+    d.rectangle([15, 15, 24, 24], fill=_COLOR_B)  # nivel intermedio: se forzará su descarte
+    d.rectangle([60, 15, 100, 45], fill=_COLOR_PICO_DESCARTADO)  # nivel superior: real, grande
+    img.save(ruta_imagen)
+
+    datos_relieve = {
+        "colores": [
+            {"hex": "#1e3c78", "altura_mm": 2.0},
+            {"hex": "#c81e28", "altura_mm": 2.6},
+            {"hex": "#0ac80a", "altura_mm": 3.2},
+        ],
+        "placa_mm": 0.0,
+        "placa_margen_mm": 1.0,
+        "escalon_mm": 0.05,
+        "area_min_mm2": 0.5,
+    }
+
+    seccion_original = relieve._seccion_mm
+    llamadas = {"n": 0}
+
+    def _seccion_mm_con_nivel_intermedio_descartado(mascara, mm_por_px, area_min_mm2):
+        llamadas["n"] += 1
+        if llamadas["n"] == 2:  # la máscara del nivel intermedio (B), dentro del bucle principal
+            return None
+        return seccion_original(mascara, mm_por_px, area_min_mm2)
+
+    monkeypatch.setattr(relieve, "_seccion_mm", _seccion_mm_con_nivel_intermedio_descartado)
+
+    destino = tmp_path / "bruto.stl"
+    relieve.generar_malla_relieve(
+        ruta_imagen, datos_relieve, largo_mm=40.0, grosor_mm=6.0, destino_stl=destino
+    )
+
+    malla = trimesh.load(destino, force="mesh")
+    assert malla.is_watertight
+
+    cuerpos = malla.split(only_watertight=False)
+    assert len(cuerpos) == 1, (
+        "sin el arreglo, la capa del nivel superior queda flotando como cuerpo "
+        "separado sobre el hueco dejado por el nivel intermedio descartado"
+    )
+    for cuerpo in cuerpos:
+        assert cuerpo.bounds[0][2] == pytest.approx(0.0, abs=1e-6), (
+            "cada cuerpo debe apoyar en z=0: ninguna capa debe flotar sobre un hueco"
+        )
+
+    assert malla.bounds[0][2] == pytest.approx(0.0, abs=1e-6)
+    assert malla.bounds[1][2] == pytest.approx(6.0 + relieve.CORTE_SACRIFICABLE_MM, abs=0.02)
 
 
 # ---------------------------------------------------------------------------
