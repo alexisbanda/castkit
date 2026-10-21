@@ -255,7 +255,7 @@ def test_proveedor_fal_fue_retirado_y_lista_los_disponibles(
     assert "Proveedores disponibles:" in err
     lista_disponibles = err.split("Proveedores disponibles:", 1)[1]
     disponibles = {parte.strip().strip(".") for parte in lista_disponibles.split(",")}
-    assert disponibles == {"comando", "imagen-3d", "tripo3d"}
+    assert disponibles == {"comando", "imagen-3d", "relieve", "tripo3d"}
 
 
 def test_flujo_completo_genera_matriz_y_ficha_tecnica_en_espanol(

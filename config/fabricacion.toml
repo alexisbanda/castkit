@@ -44,6 +44,39 @@ tripo_modelo = "v2.5-20250123"
 # tarea termine antes de fallar.
 tripo_espera_max_s = 600
 
+[relieve]
+# Proveedor local "relieve" (#43): bajorrelieve por capas de color para
+# diseños planos (logos, escudos, medallas, apliques). Es un molde abierto
+# (#55): necesita --tipo-molde abierto, --largo-mm y --grosor-mm.
+
+# Número máximo de colores planos al reducir la imagen (Image.quantize).
+colores_max = 8
+
+# Altura, en milímetros, propuesta para el color de mayor área de la figura
+# (la base del relieve). Valor relativo: se reescala a grosor_mm.
+base_mm = 2.0
+
+# Milímetros que sube la altura propuesta de un color al siguiente, de más
+# a menos área (los detalles pequeños quedan más altos). Valor relativo.
+paso_mm = 0.4
+
+# Milímetros que se contrae cada nivel respecto al de abajo, para que no
+# queden paredes coincidentes entre niveles.
+escalon_mm = 0.05
+
+# Área mínima, en mm², de una mancha de color para que no se descarte
+# (limpia el antialias y el ruido de la imagen).
+area_min_mm2 = 0.5
+
+# Grosor, en milímetros, de la placa de apoyo. 0 = sin placa: las piezas
+# sueltas (islas) se aceptan como piezas separadas y su altura se limita al
+# nivel más bajo del diseño.
+placa_mm = 0
+
+# Margen, en milímetros, de la placa alrededor de la silueta conjunta del
+# diseño (solo si placa_mm > 0).
+placa_margen_mm = 1.0
+
 [mecha]
 # Diámetro, en milímetros, del canal de mecha vertical para figuras de cera.
 diametro_mecha_mm = 3.0
