@@ -110,7 +110,47 @@ estimados y 27,1 cm³ de volumen por figura. En `output/` quedan `toro-prof_v1_m
 - **scikit-image**: traza los contornos de cada nivel de altura de los proveedores locales `relieve` y `profundidad` (`skimage.measure.find_contours`).
 - **torch** y **transformers** (extra opcional `profundidad`, ver abajo): calculan el mapa de profundidad (Depth Anything V2 Small) del proveedor local `profundidad`. No se instalan por defecto; sin ellas, el resto de castkit funciona igual.
 
-## Instalación
+## Instalación para usar castkit
+
+Para usar castkit como herramienta, sin clonar el repositorio, instálalo con
+[uv](https://docs.astral.sh/uv/) directamente desde GitHub (el repositorio es privado: necesita
+acceso SSH):
+
+```bash
+uv tool install 'castkit @ git+ssh://git@github.com/alexisbanda/castkit.git'
+
+# Con el extra opcional `profundidad` (proveedor de generación 3D, ver más abajo):
+uv tool install 'castkit[profundidad] @ git+ssh://git@github.com/alexisbanda/castkit.git'
+```
+
+Esto deja el comando `castkit` disponible en el `PATH` (sin `uv run` por delante). Para
+actualizarlo a la última versión:
+
+```bash
+uv tool upgrade castkit
+```
+
+Después de instalar (o de actualizar), `castkit comprobar` confirma que todo quedó en orden
+(Blender, configuración, el extra `profundidad`, etc.; ver [«Comprobar la instalación»](#comprobar-la-instalación-castkit-comprobar)):
+
+```bash
+castkit comprobar
+```
+
+La configuración de fabricación (`fabricacion.toml`) viaja dentro del paquete instalado y, la
+primera vez que se necesita, castkit crea sola una copia editable en la carpeta de
+configuración del usuario, según el sistema operativo:
+
+| Sistema | Carpeta |
+| --- | --- |
+| Linux | `$XDG_CONFIG_HOME/castkit` (o `~/.config/castkit` si esa variable no está definida) |
+| Windows | `%APPDATA%\castkit` |
+| macOS | `~/Library/Application Support/castkit` |
+
+Para usar otra ruta, define la variable de entorno `CASTKIT_FABRICACION_TOML` con la ruta
+completa del archivo.
+
+## Instalación para desarrollo
 
 ```bash
 uv sync
@@ -118,7 +158,10 @@ uv sync
 
 Esto instala Python 3.12 (si falta) y todas las dependencias del proyecto, incluidas las de
 desarrollo (pytest, ruff), según lo declarado en [`pyproject.toml`](pyproject.toml) y fijado en
-`uv.lock`.
+`uv.lock`. Desde un clon, los comandos de este README se escriben `uv run castkit …` (en vez de
+`castkit …`, que es como quedan una vez instalados con `uv tool install`, arriba); un clon usa
+siempre `config/fabricacion.toml` del propio repositorio, nunca la carpeta de configuración del
+usuario.
 
 ### Extra opcional `profundidad` (proveedor de generación 3D)
 
@@ -157,6 +200,31 @@ Castkit localiza el ejecutable de Blender en este orden:
 2. El comando `blender` disponible en el `PATH` del sistema.
 
 Si no encuentra ninguno, lanza un error explicando cómo instalar Blender LTS (la versión fijada en `.blender-version`) o cómo configurar `BLENDER_BIN`.
+
+## Comprobar la instalación (`castkit comprobar`)
+
+```bash
+castkit comprobar      # instalado con uv tool install
+uv run castkit comprobar  # en un clon de desarrollo
+```
+
+Informa, en español y línea a línea:
+
+- **Blender**: la ruta del ejecutable encontrado y su versión (`<blender> --version`), comparada
+  con la fijada en `.blender-version`. Si no encuentra Blender, muestra: «No se encuentra Blender
+  5.2.2: instálalo desde blender.org o define BLENDER_BIN con la ruta del ejecutable». Si la
+  versión instalada no coincide con la fijada, solo avisa (no falla).
+- **Extra `profundidad`**: si `torch` y `transformers` están instalados, y cómo instalarlos si no
+  (ver «Instalación para usar castkit» y «Extra opcional `profundidad`», arriba). Nunca hace
+  fallar la comprobación.
+- **Configuración de fabricación**: la ruta resuelta (ver «Instalación para usar castkit») y si
+  es válida.
+- **Carpeta de diseños**: la carpeta donde se crearán los diseños nuevos (`CASTKIT_DISENOS` o la
+  actual); avisa si esa carpeta cae dentro del propio clon de castkit.
+- **Clave de Tripo**: si `TRIPO_API_KEY` está definida, sin mostrar su valor.
+
+Termina con código `0` si Blender está disponible y la configuración es válida; si no, termina
+con código distinto de `0` y explica qué corregir.
 
 ## Dar de alta un diseño
 

@@ -25,7 +25,7 @@ Pipeline por etapas, cada una invocable por separado desde la línea de comandos
 4. Validación automática → informe legible (con volúmenes de figura y de silicona) + renders del punto de control 2.
 5. Empaquetado y entrega en la carpeta del pedido.
 
-Las reglas por material, la selección del proveedor de generación 3D y los parámetros de fabricación viven en configuración versionada (`config/fabricacion.toml`), separada del código, para poder ajustarlos y extenderlos sin reescribir etapas.
+Las reglas por material, la selección del proveedor de generación 3D y los parámetros de fabricación viven en configuración versionada (`config/fabricacion.toml` en un clon de desarrollo; instalado con `uv tool install`, la copia que castkit crea sola en la carpeta de configuración del usuario, ver README), separada del código, para poder ajustarlos y extenderlos sin reescribir etapas.
 
 ## Datos
 

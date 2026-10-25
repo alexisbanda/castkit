@@ -9,6 +9,7 @@ import sys
 from datetime import date, timedelta
 from pathlib import Path
 
+from castkit.comprobar import comprobar_instalacion
 from castkit.config import (
     ConfigError,
     cargar_config_limpieza,
@@ -396,6 +397,11 @@ def _construir_parser() -> argparse.ArgumentParser:
         dest="aprobar_control1",
         action="store_true",
         help="Aprueba el punto de control 1 sin preguntar (para scripts o CI).",
+    )
+
+    subparsers.add_parser(
+        "comprobar",
+        help="Comprueba que la instalación de castkit esté lista (Blender, configuración, etc.).",
     )
 
     return parser
@@ -965,6 +971,7 @@ def _ejecutar_alta_guiada(args: argparse.Namespace) -> int:
         proveedor_txt = proveedor if proveedor else "sin asignar"
         return [
             f"Nombre: {nombre}",
+            f"Carpeta donde se creará: {(destino / nombre).resolve()}",
             f"Carpeta del brief: {brief}",
             f"Qué imprime castkit: {modo}",
             f"Tipo de molde: {tipo_molde} (proveedor: {proveedor_txt})",
@@ -999,14 +1006,21 @@ def _ejecutar_alta_guiada(args: argparse.Namespace) -> int:
             if indice_editar == 1:
                 nombre = _preguntar_nombre()
             elif indice_editar == 2:
-                brief = _preguntar_brief()
+                # La carpeta se calcula a partir del nombre (línea 1) y no es
+                # un dato propio de la entrevista: no tiene pregunta propia.
+                print(
+                    "La carpeta se calcula a partir del nombre (línea 1); cambia esa "
+                    "línea si quieres que el diseño se cree en otro sitio."
+                )
             elif indice_editar == 3:
+                brief = _preguntar_brief()
+            elif indice_editar == 4:
                 modo = _preguntar_modo()
                 if modo == "figura":
                     cavidades = 1
                 else:
                     cavidades = _preguntar_cavidades(cavidades if cavidades else 1)
-            elif indice_editar == 4:
+            elif indice_editar == 5:
                 tipo_molde, proveedor = _preguntar_tipo_pieza()
                 if tipo_molde == "completo":
                     alto_mm = _preguntar_alto()
@@ -1015,29 +1029,29 @@ def _ejecutar_alta_guiada(args: argparse.Namespace) -> int:
                     largo_mm = _preguntar_largo()
                     grosor_mm = _preguntar_grosor(largo_mm)
                     alto_mm = None
-            elif indice_editar == 5:
+            elif indice_editar == 6:
                 if tipo_molde == "completo":
                     alto_mm = _preguntar_alto()
                 else:
                     largo_mm = _preguntar_largo()
                     grosor_mm = _preguntar_grosor(largo_mm)
-            elif indice_editar == 6:
-                material = _preguntar_material()
             elif indice_editar == 7:
+                material = _preguntar_material()
+            elif indice_editar == 8:
                 if modo == "figura":
                     print(
                         "Las cavidades están fijas en 1 porque el modo es «figura»; "
-                        "cambia la línea 3 si necesitas una cubeta con varias."
+                        "cambia la línea 4 si necesitas una cubeta con varias."
                     )
                 else:
                     cavidades = _preguntar_cavidades(cavidades)
-            elif indice_editar == 8:
-                cantidad = _preguntar_cantidad()
             elif indice_editar == 9:
-                fecha = _preguntar_fecha_entrega()
+                cantidad = _preguntar_cantidad()
             elif indice_editar == 10:
-                licencia = _preguntar_licencia()
+                fecha = _preguntar_fecha_entrega()
             elif indice_editar == 11:
+                licencia = _preguntar_licencia()
+            elif indice_editar == 12:
                 origen = _preguntar_origen()
             continue
         print(f"Respuesta inválida: escribe «s», «n» o un número de línea entre 1 y {len(lineas)}.")
@@ -1679,6 +1693,8 @@ def main(argv: list[str] | None = None) -> int:
         return _ejecutar_matriz(args)
     if args.comando == "flujo":
         return _ejecutar_flujo(args)
+    if args.comando == "comprobar":
+        return comprobar_instalacion()
 
     parser.print_help(sys.stderr)
     return 2
