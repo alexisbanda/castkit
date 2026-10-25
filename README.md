@@ -1,6 +1,99 @@
 # castkit
 
-Castkit — Agent-assisted pipeline that turns 3D models into production-ready mold masters and multi-cavity mold boxes for artisan casting.
+**De un dibujo, una foto o una malla 3D a la matriz imprimible y su ficha técnica para colar figuras artesanales.**
+
+`castkit` es una línea de comandos pensada para el operador de un taller que fabrica figuras
+coladas en serie: guaguas de pan, apliques, medallas, velas... A partir de un brief (imágenes,
+texto o una malla ya hecha) obtiene la malla en bruto, la limpia y escala, genera los renders del
+punto de control 1 para aprobarla, y produce la matriz `.stl` lista para imprimir junto con su
+ficha técnica.
+
+El flujo, en una línea: `alta → generar → limpieza → control1 → matriz` (con `mecha` para
+figuras de cera, y `flujo` para encadenarlo todo de una vez). `castkit version` crea una nueva
+versión de un diseño ya existente; `castkit ingesta` se usa en vez de `generar` cuando ya se
+tiene la malla en bruto.
+
+### Qué hace hoy
+
+- Molde [abierto (espalda plana, el habitual en el taller) y completo](#dar-de-alta-un-diseño).
+- Generación de la malla con los proveedores [`relieve`](#proveedor-relieve-bajorrelieve-por-capas-de-color-diseños-planos),
+  [`profundidad`](#proveedor-profundidad-media-figura-para-molde-abierto-desde-una-imagen-frontal),
+  [`imagen-3d`, `tripo3d` y `comando`](#proveedores-integrados).
+- [Limpieza y escalado de la malla, con respaldo de remallado en Blender](#respaldo-con-blender-remallado-por-vóxeles).
+- [Punto de control 1](#punto-de-control-1-renders-de-las-4-vistas-y-aprobación-castkit-control1):
+  4 renders con medidas y aprobación antes de pasar a la matriz.
+- [Matriz imprimible en modo `figura` o `cubeta` con cavidades](#generar-la-matriz-imprimible-stl-en-modo-figura-o-cubeta)
+  y su [ficha técnica](#ficha-técnica).
+- [Canal de mecha para figuras de cera](#añadir-el-canal-de-mecha-figuras-de-cera).
+- [Versionado de diseños](#crear-una-nueva-versión-de-un-diseño).
+
+### Qué no hace todavía
+
+- Moldes de dos partes ([#14](https://github.com/alexisbanda/castkit/issues/14)).
+- Validación automática e informe de la matriz ([#12](https://github.com/alexisbanda/castkit/issues/12)).
+- Paquete de fabricación y entrega al taller ([#13](https://github.com/alexisbanda/castkit/issues/13)).
+- Estimación de costes ([#16](https://github.com/alexisbanda/castkit/issues/16)).
+- Biblioteca de diseños ([#15](https://github.com/alexisbanda/castkit/issues/15)).
+
+Límites actuales: los proveedores locales esperan un fondo liso o transparente
+([#54](https://github.com/alexisbanda/castkit/issues/54), [#57](https://github.com/alexisbanda/castkit/issues/57));
+`imagen-3d` da figuras toscas; `tripo3d` necesita saldo en la API de Tripo (variable de entorno
+`TRIPO_API_KEY`); el remallado de respaldo de Blender casi nunca es fiel
+([#28](https://github.com/alexisbanda/castkit/issues/28)). Tampoco se instala todavía como
+comando independiente ([#64](https://github.com/alexisbanda/castkit/issues/64)) ni tiene alta
+guiada ([#65](https://github.com/alexisbanda/castkit/issues/65)).
+
+### Qué proveedor elegir
+
+| Qué quieres fabricar | Proveedor |
+| --- | --- |
+| Diseño plano de colores (logo, escudo, medalla) | `relieve` |
+| Media figura, desde una imagen frontal o de perfil | `profundidad` |
+| Figura completa | `imagen-3d` o `tripo3d` |
+| Ya tienes la malla hecha | `castkit ingesta` |
+| Herramienta externa propia | `comando` |
+
+### Ejemplo: del dibujo a la matriz
+
+Prueba real del 2026-10-25: a partir del dibujo del toro futbolista (media figura, vista
+frontal), un molde abierto de 80 mm de largo y 15 mm de grosor, en silicona, matriz en modo
+cubeta con 1 cavidad, para 10 piezas con entrega el 2026-11-15.
+
+```bash
+uv sync --extra profundidad
+uv run castkit alta toro-prof \
+  --brief ~/pedidos/brief-toro \
+  --material silicona \
+  --tipo-molde abierto \
+  --largo-mm 80 \
+  --grosor-mm 15 \
+  --cavidades 1 \
+  --cantidad 10 \
+  --fecha 2026-11-15 \
+  --licencia propio \
+  --origen "dibujo del cliente"
+uv run castkit generar toro-prof --proveedor profundidad
+uv run castkit limpieza toro-prof
+uv run castkit control1 toro-prof
+uv run castkit control1 toro-prof --aprobar
+uv run castkit matriz toro-prof --modo cubeta
+```
+
+`castkit flujo toro-prof --proveedor profundidad --modo cubeta` encadena todo eso, de
+`generar` a `matriz`, en un solo comando.
+
+**Aviso:** el dibujo original era una foto de papel con fondo degradado, y le sacaba una placa de
+más a la figura (el proveedor `profundidad` toma como fondo el color del borde de la imagen).
+Hubo que dejar el fondo transparente antes de generar.
+
+| Dibujo (fondo transparente) | Render del punto de control 1 |
+| --- | --- |
+| ![Dibujo del toro futbolista, media figura con fondo transparente](docs/img/toro-dibujo.png) | ![Render «arriba» de la figura del toro, con las medidas 61,8 × 80,0 × 15,0 mm sobreimpresas](docs/img/toro-render.png) |
+
+`generar` tardó 11,8 s en CPU (malla en bruto de 82 566 caras). La figura limpia quedó en
+61,8 × 80,0 × 15,0 mm; la matriz, en 87,8 × 106,0 × 28,0 mm, con unos 177 ml de silicona
+estimados y 27,1 cm³ de volumen por figura. En `output/` quedan `toro-prof_v1_matriz.stl`,
+`toro-prof_v1_ficha.md` y los cuatro renders del punto de control 1.
 
 ## Requisitos
 

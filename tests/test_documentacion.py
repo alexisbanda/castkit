@@ -4,11 +4,16 @@ No valida el contenido en detalle: solo que cada subcomando, cada opción `--…
 y cada clave de cada sección de `config/fabricacion.toml` aparezcan como texto literal
 en `README.md`. Así, un subcomando u opción nuevos (o una clave de configuración nueva)
 que no se documenten hacen fallar el test con un mensaje que los lista.
+
+También comprueba que los enlaces internos de `README.md` (anclas `#…` y rutas relativas)
+apunten a algo que exista: un encabezado real (para las anclas) o un archivo del repositorio
+(para las rutas).
 """
 
 from __future__ import annotations
 
 import argparse
+import re
 import tomllib
 from pathlib import Path
 
@@ -57,3 +62,50 @@ def test_claves_de_fabricacion_toml_estan_en_el_readme() -> None:
     assert not faltantes, (
         "Faltan en README.md estas claves de config/fabricacion.toml: " + ", ".join(faltantes)
     )
+
+
+def _slug_github(encabezado: str) -> str:
+    """Genera el ancla que GitHub asignaría a un encabezado de Markdown.
+
+    Minúsculas; se quita todo lo que no sea letra (se conservan tildes y «ñ»), número,
+    espacio o guion; los espacios se convierten en guiones.
+    """
+
+    texto = encabezado.lower()
+    texto = "".join(ch for ch in texto if ch.isalnum() or ch in (" ", "-"))
+    return re.sub(r"\s+", "-", texto)
+
+
+def _anclas_disponibles() -> set[str]:
+    anclas: set[str] = set()
+    contador: dict[str, int] = {}
+    for linea in _README.splitlines():
+        coincidencia = re.match(r"^#{1,6}\s+(.*)$", linea)
+        if not coincidencia:
+            continue
+        slug = _slug_github(coincidencia.group(1))
+        n = contador.get(slug, 0)
+        contador[slug] = n + 1
+        anclas.add(slug if n == 0 else f"{slug}-{n}")
+    return anclas
+
+
+def test_enlaces_internos_del_readme_apuntan_a_algo_que_existe() -> None:
+    anclas_disponibles = _anclas_disponibles()
+
+    rotos: list[str] = []
+    for destino in re.findall(r"\]\(([^)]+)\)", _README):
+        if destino.startswith(("http://", "https://", "mailto:")):
+            continue
+
+        if destino.startswith("#"):
+            ancla = destino[1:]
+            if ancla not in anclas_disponibles:
+                rotos.append(f"ancla #{ancla} (sin encabezado correspondiente)")
+            continue
+
+        ruta = (_RAIZ / destino).resolve()
+        if not ruta.exists():
+            rotos.append(f"ruta {destino} (no existe en el repositorio)")
+
+    assert not rotos, "Enlaces internos rotos en README.md: " + ", ".join(rotos)
