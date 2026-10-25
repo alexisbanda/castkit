@@ -113,6 +113,8 @@ class DatosAlta:
     tipo_molde: str = "completo"
     largo_mm: float | None = None
     grosor_mm: float | None = None
+    proveedor: str | None = None
+    modo_matriz: str | None = None
 
     def __post_init__(self) -> None:
         validar_nombre(self.nombre)
@@ -266,6 +268,8 @@ def crear_diseno(datos: DatosAlta, destino: Path | None = None) -> Path:
                     "largo_mm": datos.largo_mm,
                     "grosor_mm": datos.grosor_mm,
                     "cavidades": datos.cavidades,
+                    "proveedor": datos.proveedor,
+                    "modo_matriz": datos.modo_matriz,
                     "parametros": {},
                 }
             },

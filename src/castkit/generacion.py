@@ -860,9 +860,12 @@ def generar_malla(
     2. Recolecta los insumos de `<carpeta>/brief/` más `prompt` (si se indicó).
     3. Si hay un `.stl` en `brief/` y no se forzó `proveedor`, valida ese STL y
        lo guarda directamente en `input/`.
-    4. En caso contrario, ejecuta el proveedor enchufable configurado, valida
-       el STL generado y lo guarda en `input/`, registrando los parámetros en
-       la etapa `"generacion"`.
+    4. En caso contrario, ejecuta el proveedor enchufable: si se pasó
+       `proveedor` explícito se usa ese; si no, el guardado en la versión
+       actual (lo dejó `castkit alta` o `castkit version`, ticket #65); si
+       tampoco hay uno guardado, el de `config/fabricacion.toml`. Valida el
+       STL generado, lo guarda en `input/` y registra los parámetros en la
+       etapa `"generacion"`.
     """
     carpeta = Path(carpeta)
     datos = cargar_diseno(carpeta)
@@ -891,12 +894,22 @@ def generar_malla(
         nombre_proveedor = "stl-directo"
         archivos_usados = [stl_brief.name]
     else:
-        nombre_proveedor = proveedor if proveedor is not None else str(config_gen["proveedor"])
+        info_version = datos_version(datos)
+        # Si no se pasó --proveedor explícito, se usa el proveedor guardado en
+        # la versión actual (lo dejó `castkit alta` o `castkit version`); solo
+        # si tampoco hay uno guardado (diseños antiguos, o que no lo guardaron)
+        # se cae al de `config/fabricacion.toml`, igual que antes del #65.
+        if proveedor is not None:
+            nombre_proveedor = proveedor
+        elif info_version.get("proveedor"):
+            nombre_proveedor = str(info_version["proveedor"])
+        else:
+            nombre_proveedor = str(config_gen["proveedor"])
         instancia_proveedor = obtener_proveedor(nombre_proveedor, config_gen)
 
         metodo_usar_version = getattr(instancia_proveedor, "usar_version", None)
         if callable(metodo_usar_version):
-            metodo_usar_version(datos_version(datos))
+            metodo_usar_version(info_version)
 
         if not insumos.tiene_insumos_para_proveedor():
             formatos_txt = ", ".join(FORMATOS_SOPORTADOS)
