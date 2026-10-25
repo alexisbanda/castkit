@@ -74,6 +74,18 @@ _N_MUESTRAS_DISTANCIA = 300
 # medición de distancia (ver `_distancia_maxima`).
 _MARGEN_EXCLUSION = 2.0
 
+# Tope de pares punto × triángulo que `_distancias_a_superficie` procesa a
+# la vez. Por encima de este tope, el array intermedio de
+# `closest_point_naive` (puntos × triángulos) agota la memoria con mallas de
+# millones de caras (#52): con 300 puntos contra una malla de 5 M de
+# triángulos, ese array llega a varios GB. Medido con `tracemalloc`:
+# `trimesh.triangles.closest_point` usa, por los arrays intermedios que
+# construye internamente, del orden de 600-700 bytes por par (no los ~24
+# bytes de los arrays de entrada/salida); 500_000 pares mantiene el pico de
+# memoria de cada bloque por debajo de los ~350 MB, con margen bajo los
+# 500 MB exigidos.
+_TOPE_PARES_DISTANCIA = 500_000
+
 
 class LimpiezaError(VersionError):
     """Se lanza cuando la limpieza de la malla no puede completarse.
@@ -298,6 +310,62 @@ def _filtrar_exclusiones(puntos: np.ndarray, exclusiones: list[dict[str, Any]]) 
     return puntos[fuera_de_todas]
 
 
+def _distancias_a_superficie(malla: trimesh.Trimesh, puntos: np.ndarray) -> np.ndarray:
+    """Distancia mínima de cada punto de ``puntos`` a la superficie de ``malla``.
+
+    Calcula lo mismo que `trimesh.proximity.closest_point_naive` (búsqueda
+    exacta por fuerza bruta, sin `rtree`: no es una dependencia del
+    proyecto), pero repartiendo el trabajo en bloques en vez de construir de
+    una sola vez el array de puntos × triángulos. Ese array es lo que agota
+    la memoria con mallas de millones de caras (#52): con ``closest_point_naive``,
+    300 puntos contra 5 M de triángulos ya llegan a varios GB.
+
+    Primero reparte los puntos en bloques, con un tamaño tal que
+    bloque_de_puntos × n_triángulos no pase de `_TOPE_PARES_DISTANCIA`. Si la
+    malla sola ya supera ese tope (un único punto contra todos sus
+    triángulos), también reparte los triángulos en bloques (calculando
+    directamente sobre ``malla.triangles[i:j]``, sin construir una submalla)
+    y se queda, para cada punto, con la distancia mínima entre todos los
+    bloques de triángulos. El resultado es idéntico (± error de
+    redondeo) al de `closest_point_naive`, que usa la misma rutina de
+    distancia punto-triángulo (:func:`trimesh.triangles.closest_point`) sin
+    trocear.
+    """
+    n_puntos = len(puntos)
+    triangulos = malla.triangles.view(np.ndarray)
+    n_triangulos = len(triangulos)
+    if n_puntos == 0 or n_triangulos == 0:
+        return np.zeros(n_puntos, dtype=np.float64)
+
+    puntos = np.asarray(puntos, dtype=np.float64)
+    distancias = np.empty(n_puntos, dtype=np.float64)
+    puntos_por_bloque = max(1, _TOPE_PARES_DISTANCIA // n_triangulos)
+
+    for inicio in range(0, n_puntos, puntos_por_bloque):
+        fin = min(inicio + puntos_por_bloque, n_puntos)
+        bloque_puntos = puntos[inicio:fin]
+        n_bloque = len(bloque_puntos)
+        triangulos_por_bloque = max(1, _TOPE_PARES_DISTANCIA // n_bloque)
+
+        minimos_2 = np.full(n_bloque, np.inf, dtype=np.float64)
+        for inicio_t in range(0, n_triangulos, triangulos_por_bloque):
+            fin_t = min(inicio_t + triangulos_por_bloque, n_triangulos)
+            bloque_tri = triangulos[inicio_t:fin_t]
+            n_tri_bloque = len(bloque_tri)
+
+            # Cada punto del bloque contra cada triángulo del bloque de
+            # triángulos: como máximo _TOPE_PARES_DISTANCIA pares a la vez.
+            puntos_rep = np.repeat(bloque_puntos, n_tri_bloque, axis=0)
+            tri_rep = np.tile(bloque_tri, (n_bloque, 1, 1))
+            cercanos = trimesh.triangles.closest_point(tri_rep, puntos_rep)
+            dist_2 = ((cercanos - puntos_rep) ** 2).sum(axis=1).reshape(n_bloque, n_tri_bloque)
+            minimos_2 = np.minimum(minimos_2, dist_2.min(axis=1))
+
+        distancias[inicio:fin] = np.sqrt(minimos_2)
+
+    return distancias
+
+
 def _distancia_maxima(
     referencia: trimesh.Trimesh,
     limpia: trimesh.Trimesh,
@@ -309,11 +377,10 @@ def _distancia_maxima(
     """Distancia máxima entre las superficies de ``referencia`` y ``limpia``.
 
     Muestrea puntos de la superficie de cada malla y busca, para cada punto,
-    el punto más cercano en la superficie de la otra (en ambos sentidos). No
-    usa `rtree` (no es una dependencia del proyecto): la búsqueda del punto
-    más cercano es exacta pero fuerza bruta
-    (:func:`trimesh.proximity.closest_point_naive`), razonable para los
-    tamaños de malla de esta etapa.
+    el punto más cercano en la superficie de la otra (en ambos sentidos),
+    con :func:`_distancias_a_superficie` (búsqueda exacta por fuerza bruta,
+    repartida en bloques para no agotar la memoria con mallas grandes; ver
+    #52).
 
     Las zonas de ``exclusiones`` (los huecos que se cerraron) se excluyen de
     los puntos muestreados en ``limpia``, para no penalizar el parche que los
@@ -332,14 +399,14 @@ def _distancia_maxima(
     if len(puntos_ref) == 0:
         distancia_ref = np.array([0.0])
     else:
-        _, distancia_ref, _ = trimesh.proximity.closest_point_naive(limpia, puntos_ref)
+        distancia_ref = _distancias_a_superficie(limpia, puntos_ref)
 
     puntos_limpia, _ = trimesh.sample.sample_surface(limpia, n_muestras, seed=0)
     puntos_limpia = _filtrar_exclusiones(puntos_limpia, exclusiones)
     if len(puntos_limpia) == 0:
         distancia_limpia = np.array([0.0])
     else:
-        _, distancia_limpia, _ = trimesh.proximity.closest_point_naive(referencia, puntos_limpia)
+        distancia_limpia = _distancias_a_superficie(referencia, puntos_limpia)
 
     return float(max(distancia_ref.max(), distancia_limpia.max()))
 
@@ -485,6 +552,18 @@ def limpiar_malla(
         malla = _remallar_con_blender(malla_escalada_original, voxel_mm)
         metodo = "blender"
         huecos_cerrados = []
+        # El remallado por vóxeles de Blender puede dejar muchísimas más
+        # caras que `caras_max` (voxel_mm chico, figura grande). Se
+        # simplifica aquí, antes de comprobar watertight/volumen y de medir
+        # `distancia_remallado_mm`, para que esa distancia ya incluya el
+        # efecto de la simplificación y el resto del flujo (huecos, corte de
+        # base, medición final) trabaje sobre la malla reducida en vez de
+        # sobre los millones de caras del remallado (#52). Si tras
+        # simplificar no queda cerrada, se mantiene el mensaje de error de
+        # siempre.
+        if len(malla.faces) > caras_max:
+            malla = malla.simplify_quadric_decimation(face_count=caras_max)
+            trimesh.repair.fix_normals(malla)
         if not malla.is_watertight:
             raise LimpiezaError(
                 "La malla tampoco quedó cerrada tras el remallado de respaldo con Blender."
