@@ -134,7 +134,10 @@ def datos_version(datos: dict[str, Any], version: int | None = None) -> dict[str
 
     Si ``version`` es ``None``, usa ``version_actual``. El resultado tiene las
     claves ``version``, ``tipo_molde``, ``alto_mm``, ``largo_mm``,
-    ``grosor_mm``, ``cavidades`` y ``parametros``. Si la entrada de la versión
+    ``grosor_mm``, ``cavidades``, ``proveedor``, ``modo_matriz`` y
+    ``parametros``. ``proveedor`` y ``modo_matriz`` son ``None`` si la versión
+    no los guardó (p. ej. un diseño dado de alta antes del ticket #65, o un
+    alta que no los indicó). Si la entrada de la versión
     no tiene ``tipo_molde`` (diseños dados de alta antes del ticket #55), se
     trata como ``"completo"``. Si no tiene ``alto_mm`` o ``cavidades``
     (diseños dados de alta antes del ticket #4), se usan de respaldo
@@ -174,6 +177,8 @@ def datos_version(datos: dict[str, Any], version: int | None = None) -> dict[str
         "largo_mm": largo_mm,
         "grosor_mm": grosor_mm,
         "cavidades": cavidades,
+        "proveedor": entrada.get("proveedor"),
+        "modo_matriz": entrada.get("modo_matriz"),
         "parametros": entrada.get("parametros", {}),
     }
 
@@ -252,6 +257,8 @@ def crear_version(
         "largo_mm": largo_efectivo,
         "grosor_mm": grosor_efectivo,
         "cavidades": cavidades_efectivas,
+        "proveedor": anterior["proveedor"],
+        "modo_matriz": anterior["modo_matriz"],
         "parametros": copy.deepcopy(anterior["parametros"]),
     }
 

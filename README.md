@@ -15,7 +15,8 @@ tiene la malla en bruto.
 
 ### Qué hace hoy
 
-- Molde [abierto (espalda plana, el habitual en el taller) y completo](#dar-de-alta-un-diseño).
+- [Alta guiada por entrevista](#entrevista-guiada-castkit-alta-sin-nombre), con molde
+  [abierto (espalda plana, el habitual en el taller) y completo](#dar-de-alta-un-diseño).
 - Generación de la malla con los proveedores [`relieve`](#proveedor-relieve-bajorrelieve-por-capas-de-color-diseños-planos),
   [`profundidad`](#proveedor-profundidad-media-figura-para-molde-abierto-desde-una-imagen-frontal),
   [`imagen-3d`, `tripo3d` y `comando`](#proveedores-integrados).
@@ -40,8 +41,7 @@ Límites actuales: los proveedores locales esperan un fondo liso o transparente
 `imagen-3d` da figuras toscas; `tripo3d` necesita saldo en la API de Tripo (variable de entorno
 `TRIPO_API_KEY`); el remallado de respaldo de Blender casi nunca es fiel
 ([#28](https://github.com/alexisbanda/castkit/issues/28)). Tampoco se instala todavía como
-comando independiente ([#64](https://github.com/alexisbanda/castkit/issues/64)) ni tiene alta
-guiada ([#65](https://github.com/alexisbanda/castkit/issues/65)).
+comando independiente ([#64](https://github.com/alexisbanda/castkit/issues/64)).
 
 ### Qué proveedor elegir
 
@@ -160,7 +160,63 @@ Si no encuentra ninguno, lanza un error explicando cómo instalar Blender LTS (l
 
 ## Dar de alta un diseño
 
-`castkit alta` crea la carpeta estándar de un diseño nuevo a partir de su brief:
+`castkit alta` crea la carpeta estándar de un diseño nuevo a partir de su brief. El `nombre` es
+opcional: si se omite en una terminal interactiva, `castkit` hace una **entrevista guiada**
+(ticket #65) que pregunta paso a paso lo que falte, cada pregunta con una explicación de una
+línea y un valor propuesto entre corchetes que se acepta con Intro.
+
+### Entrevista guiada (`castkit alta`, sin `nombre`)
+
+```text
+$ uv run castkit alta
+Nombre del diseño: toro
+Carpeta del brief: ~/pedidos/brief-toro
+Encontré 1 imagen: toro-frente-sinfondo.png
+¿Qué imprime castkit? 1) el molde listo para verter silicona (cubeta) 2) solo la figura, para hacer el molde aparte [1]:
+¿Qué tipo de pieza es? 1) diseño plano (logo, escudo, medalla) 2) media figura (frente con relieve, espalda plana) 3) figura completa [2]:
+Largo en mm [80]:
+Grosor en mm [15]:
+Material de la pieza final 1) porcelana-fria 2) silicona 3) cera [2]:
+Número de cavidades [1]:
+Cantidad a producir [1]: 10
+Fecha de entrega [2026-11-15]: 2026-11-15
+Licencia del modelo base [propio]:
+Origen del modelo base: dibujo del cliente
+
+Resumen del diseño:
+1. Nombre: toro
+2. Carpeta del brief: /home/usuario/pedidos/brief-toro
+3. Qué imprime castkit: cubeta
+4. Tipo de molde: abierto (proveedor: profundidad)
+5. Medidas: largo 80 mm, grosor 15 mm
+6. Material de la pieza final: silicona
+7. Cavidades: 1
+8. Cantidad a producir: 10
+9. Fecha de entrega: 2026-11-15
+10. Licencia del modelo base: propio
+11. Origen del modelo base: dibujo del cliente
+¿Crear el diseño? (S/n, o el número de la línea que quieres cambiar):
+Diseño «toro» creado en /home/usuario/toro.
+Siguiente paso: castkit flujo toro
+```
+
+Cada medida acepta punto o coma decimal (`92,5`); un largo o alto mayor de 300 mm, o un grosor
+mayor o igual que el largo, pide confirmación `(s/N)` antes de aceptarse (con «n» se vuelve a
+preguntar esa medida). El tipo de pieza fija el tipo de molde y el proveedor de generación 3D que
+se guardan en la versión: **plano** → `abierto` + `relieve`; **media figura** → `abierto` +
+`profundidad`; **figura completa** → `completo` + `imagen-3d` (con el aviso de que el molde de
+dos partes, [#14](https://github.com/alexisbanda/castkit/issues/14), todavía no existe). En el
+resumen final, Intro o «s» crea el diseño, «n» no crea nada (código de salida 1) y el número de
+una línea la vuelve a preguntar (si cambia el tipo de pieza o el modo, también lo que depende de
+ella: medidas o cavidades). Toda respuesta inválida muestra el motivo en español y repite solo
+esa pregunta, sin perder las respuestas anteriores.
+
+Cualquier opción ya indicada en el propio comando (`--brief`, `--material`, `--modo`,
+`--proveedor`, etc.) no se vuelve a preguntar. Con `nombre` en el comando (el uso clásico, abajo)
+o sin terminal interactiva, `castkit alta` sigue pidiendo solo las opciones obligatorias que
+falten, igual que antes de este ticket.
+
+### Uso clásico (con `nombre` y opciones por la línea de comandos)
 
 ```bash
 # Molde abierto (el habitual: la figura tumbada, cortada por un plano, con la
@@ -236,6 +292,8 @@ siempre como `completo` y se comporta exactamente igual que antes.
 | `--fecha` | sí | fecha de entrega, formato `AAAA-MM-DD` |
 | `--licencia` | sí | `propio`, `comercial` |
 | `--origen` | sí | texto libre: de dónde viene el modelo base |
+| `--modo` | no | `figura`, `cubeta`: se guarda en la versión para que `generar`/`matriz`/`flujo` no lo vuelvan a preguntar |
+| `--proveedor` | no | proveedor de generación 3D: se guarda en la versión para que `generar`/`flujo` no usen el de `config/fabricacion.toml` |
 
 Si el nombre no cumple el formato (mayúsculas, espacios, tildes, etc.), el alta se rechaza y
 propone un nombre corregido; por ejemplo, «Guagua de Pan» se corrige a `guagua-de-pan`.
@@ -625,7 +683,7 @@ los parámetros usados y los segundos de cálculo.
 | Opción | Obligatoria | Valores aceptados |
 | --- | --- | --- |
 | `nombre` (posicional) | sí | nombre de un diseño ya dado de alta |
-| `--proveedor` | no | `comando`, `imagen-3d`, `relieve`, `profundidad`, `tripo3d`, o un proveedor registrado en tiempo de ejecución (si se omite, se usa `config/fabricacion.toml`) |
+| `--proveedor` | no | `comando`, `imagen-3d`, `relieve`, `profundidad`, `tripo3d`, o un proveedor registrado en tiempo de ejecución; si se omite, se usa el proveedor guardado en la versión (lo dejó `castkit alta --proveedor`, ticket #65) y, si no hay uno guardado, el de `config/fabricacion.toml` |
 | `--prompt` | no | texto o prompt de contexto adicional para el generador 3D |
 | `--reemplazar` | no | reemplaza sin preguntar la malla ya guardada en la versión actual, si existe |
 
@@ -796,7 +854,7 @@ un diseño de cualquiera de los dos tipos de molde.
 | Opción | Obligatoria | Valores aceptados |
 | --- | --- | --- |
 | `nombre` (posicional) | sí | nombre de un diseño ya dado de alta y con malla limpia |
-| `--modo` | sí (se pregunta si hay terminal) | `figura`, `cubeta` |
+| `--modo` | no si hay un modo guardado en la versión (lo dejó `castkit alta --modo`, ticket #65); si no, se pregunta en terminal interactiva o es obligatoria sin terminal | `figura`, `cubeta` |
 | `--espesor-base-mm` | no | número mayor que 0 (por defecto `3.0` en `config/fabricacion.toml`) |
 | `--margen-silicona-mm` | no | número mayor que 0 (por defecto `10.0` en `config/fabricacion.toml`) |
 | `--espesor-pared-mm` | no | número mayor que 0 (por defecto `3.0` en `config/fabricacion.toml`) |
@@ -837,6 +895,11 @@ las opciones finas de cada etapa, como `--caras-max` o `--espesor-pared-mm`): so
 `--proveedor`, `--prompt` y `--reemplazar` a `generar`, y `--modo` a `matriz`. Si el punto de
 control 1 queda pendiente o rechazado (y no se pasa `--aprobar-control1`, o se responde que no en
 una terminal interactiva), el flujo se detiene antes de generar la matriz.
+
+Igual que `generar` y `matriz`, si `flujo` no recibe `--proveedor` o `--modo`, usa los que estén
+guardados en la versión (los dejó `castkit alta --proveedor --modo`, ticket #65) sin preguntar
+nada nuevo; una opción explícita en `flujo` siempre manda sobre lo guardado, y un diseño sin nada
+guardado se comporta igual que antes de este ticket.
 
 ### Opciones
 

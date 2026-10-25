@@ -6,7 +6,7 @@ import argparse
 import contextlib
 import math
 import sys
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 from castkit.config import (
@@ -31,7 +31,15 @@ from castkit.diseno import (
     crear_diseno,
     validar_nombre,
 )
-from castkit.generacion import GeneracionError, generar_malla
+from castkit.entrevista import (
+    formatear_numero,
+    preguntar_entero_minimo_uno,
+    preguntar_fecha,
+    preguntar_medida_mm,
+    preguntar_opcion_numerada,
+    preguntar_texto,
+)
+from castkit.generacion import GeneracionError, generar_malla, recolectar_insumos_brief
 from castkit.ingesta import IngestaError, ingerir_malla, validar_malla
 from castkit.limpieza import EJES_ACEPTADOS, LimpiezaError, limpiar_malla, validar_arriba
 from castkit.matriz import MODOS_MATRIZ, MatrizError, generar_matriz, validar_modo_matriz
@@ -40,6 +48,7 @@ from castkit.versiones import (
     VersionError,
     cargar_diseno,
     crear_version,
+    datos_version,
     nombre_archivo,
     ubicar_diseno,
 )
@@ -109,7 +118,13 @@ def _construir_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="comando", required=True)
 
     alta = subparsers.add_parser("alta", help="Da de alta un diseño nuevo a partir de su brief.")
-    alta.add_argument("nombre", help="Nombre del diseño (minúsculas, números y guiones).")
+    alta.add_argument(
+        "nombre",
+        nargs="?",
+        default=None,
+        help="Nombre del diseño (minúsculas, números y guiones). Si se omite en una "
+        "terminal interactiva, se pregunta en la entrevista guiada.",
+    )
     alta.add_argument("--brief", default=None, help="Carpeta con el brief del diseño.")
     alta.add_argument("--material", default=None, help=f"Material: {', '.join(MATERIALES)}.")
     alta.add_argument(
@@ -144,6 +159,19 @@ def _construir_parser() -> argparse.ArgumentParser:
         "--licencia", default=None, help=f"Licencia del modelo base: {', '.join(LICENCIAS)}."
     )
     alta.add_argument("--origen", default=None, help="Origen del modelo base (texto libre).")
+    alta.add_argument(
+        "--modo",
+        default=None,
+        help=f"Modo de matriz a recordar en la versión: {', '.join(MODOS_MATRIZ)} (opcional; "
+        "si se omite, `generar`/`matriz`/`flujo` seguirán preguntándolo o usando "
+        "config/fabricacion.toml, como hoy).",
+    )
+    alta.add_argument(
+        "--proveedor",
+        default=None,
+        help="Proveedor de generación 3D a recordar en la versión (opcional; si se omite, "
+        "`generar`/`flujo` usarán config/fabricacion.toml, como hoy).",
+    )
 
     version = subparsers.add_parser(
         "version", help="Crea la siguiente versión de un diseño existente."
@@ -486,6 +514,20 @@ def _validar_combinacion_tipo_molde(
 
 
 def _ejecutar_alta(args: argparse.Namespace) -> int:
+    # Sin nombre: en terminal interactiva se hace la entrevista guiada
+    # completa (ticket #65), que pregunta también el nombre; sin terminal,
+    # `alta` sigue exigiéndolo como antes (ahora con un mensaje explícito, en
+    # vez del error de argparse de cuando era un posicional obligatorio).
+    if args.nombre is None:
+        if sys.stdin.isatty():
+            return _ejecutar_alta_guiada(args)
+        print(
+            "Error: falta el nombre del diseño; pásalo como primer argumento "
+            "(en una terminal interactiva puedes omitirlo para la entrevista guiada).",
+            file=sys.stderr,
+        )
+        return 2
+
     # Se valida el nombre, la carpeta de diseños y que el diseño no exista ya
     # ANTES de detectar opciones faltantes: si algo de esto falla, no se
     # pregunta nada.
@@ -566,6 +608,8 @@ def _ejecutar_alta(args: argparse.Namespace) -> int:
         cantidad = _parsear_entero_minimo_uno(valores["cantidad"], "--cantidad")
         fecha = _parsear_fecha(valores["fecha"])
         brief = _limpiar_ruta(valores["brief"])
+        modo_matriz = validar_modo_matriz(args.modo.strip().lower()) if args.modo else None
+        proveedor = args.proveedor.strip() if args.proveedor else None
 
         if tipo_molde == "completo":
             alto_mm = _parsear_numero_positivo(valores["alto_mm"], "--alto-mm")
@@ -593,6 +637,8 @@ def _ejecutar_alta(args: argparse.Namespace) -> int:
             tipo_molde=tipo_molde,
             largo_mm=largo_mm,
             grosor_mm=grosor_mm,
+            proveedor=proveedor,
+            modo_matriz=modo_matriz,
         )
         ruta = crear_diseno(datos, destino=destino)
     except AltaError as exc:
@@ -600,6 +646,426 @@ def _ejecutar_alta(args: argparse.Namespace) -> int:
         return 1
 
     print(f"Diseño «{datos.nombre}» creado en {ruta}")
+    return 0
+
+
+# Tipo de pieza -> (tipo_molde, proveedor) de la entrevista guiada (ticket #65).
+_PIEZA_A_MOLDE_PROVEEDOR = {
+    "plano": ("abierto", "relieve"),
+    "media": ("abierto", "profundidad"),
+    "completa": ("completo", "imagen-3d"),
+}
+
+
+def _ejecutar_alta_guiada(args: argparse.Namespace) -> int:
+    """Entrevista guiada de `castkit alta` (ticket #65), paso a paso y editable.
+
+    Pregunta, en orden, lo que no venga ya en `args` (nombre, carpeta del
+    brief, qué imprime castkit, tipo de pieza, medidas, material, cavidades,
+    cantidad, fecha, licencia y origen), cada pregunta con una explicación y
+    un valor propuesto entre corchetes que se acepta con Intro. Al final
+    muestra un resumen numerado: Intro o «s» crea el diseño, «n» no crea nada
+    (código 1) y el número de una línea la vuelve a preguntar (y, si cambia el
+    tipo de pieza o el modo, lo que depende de ella).
+    """
+    try:
+        destino = carpeta_disenos()
+    except AltaError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    def _validar_nombre_disponible(valor: str) -> None:
+        try:
+            validar_nombre(valor)
+        except AltaError as exc:
+            raise ValueError(str(exc)) from exc
+        if (destino / valor).exists():
+            raise ValueError(f'el diseño "{valor}" ya existe en {destino}; elige otro nombre.')
+
+    def _preguntar_nombre() -> str:
+        return preguntar_texto(
+            "Nombre del diseño",
+            "Minúsculas, números y guiones, sin tildes ni espacios (p. ej. «toro»).",
+            None,
+            validar=_validar_nombre_disponible,
+        )
+
+    def _validar_brief_existe(valor: str) -> None:
+        ruta = Path(_limpiar_ruta(valor))
+        if not ruta.is_dir():
+            raise ValueError(f'"{valor}" no existe o no es una carpeta.')
+
+    def _informar_insumos_brief(ruta: Path) -> None:
+        insumos = recolectar_insumos_brief(ruta)
+        if insumos.imagenes:
+            nombres_imgs = ", ".join(p.name for p in insumos.imagenes)
+            n = len(insumos.imagenes)
+            palabra = "imagen" if n == 1 else "imágenes"
+            print(f"Encontré {n} {palabra}: {nombres_imgs}")
+        else:
+            print(
+                "Aviso: no encontré ninguna imagen en el brief; los proveedores locales "
+                "(relieve, profundidad) necesitan una."
+            )
+
+    def _preguntar_brief() -> Path:
+        texto = preguntar_texto(
+            "Carpeta del brief",
+            "Carpeta con las imágenes, documentos o texto del brief del cliente.",
+            None,
+            validar=_validar_brief_existe,
+        )
+        ruta = Path(_limpiar_ruta(texto))
+        _informar_insumos_brief(ruta)
+        return ruta
+
+    _OPCIONES_MODO = (
+        ("cubeta", "el molde listo para verter silicona (cubeta)"),
+        ("figura", "solo la figura, para hacer el molde aparte"),
+    )
+
+    def _preguntar_modo() -> str:
+        return preguntar_opcion_numerada("¿Qué imprime castkit?", None, _OPCIONES_MODO, "cubeta")
+
+    _OPCIONES_PIEZA = (
+        ("plano", "diseño plano (logo, escudo, medalla)"),
+        ("media", "media figura (frente con relieve, espalda plana)"),
+        ("completa", "figura completa"),
+    )
+
+    def _preguntar_tipo_pieza() -> tuple[str, str]:
+        pieza = preguntar_opcion_numerada("¿Qué tipo de pieza es?", None, _OPCIONES_PIEZA, "media")
+        tipo_molde_nuevo, proveedor_nuevo = _PIEZA_A_MOLDE_PROVEEDOR[pieza]
+        if pieza == "completa":
+            print(
+                "Aviso: el molde de dos partes todavía no existe (#14); por ahora la figura "
+                "completa se genera como una sola pieza."
+            )
+        return tipo_molde_nuevo, proveedor_nuevo
+
+    def _preguntar_alto() -> float:
+        return preguntar_medida_mm("Alto en mm", "La altura total de la figura, de pie.", 100.0)
+
+    def _preguntar_largo() -> float:
+        return preguntar_medida_mm(
+            "Largo en mm", "La medida mayor de la figura vista de frente.", 80.0
+        )
+
+    def _preguntar_grosor(largo_actual: float) -> float:
+        return preguntar_medida_mm(
+            "Grosor en mm",
+            "Lo que sobresale de la placa.",
+            15.0,
+            comparar_mayor_o_igual=("largo", largo_actual),
+        )
+
+    _OPCIONES_MATERIAL = tuple((m, m) for m in MATERIALES)
+
+    def _preguntar_material() -> str:
+        return preguntar_opcion_numerada(
+            "Material de la pieza final",
+            "El molde que se vierte en la cubeta es siempre de silicona; esto es el "
+            "material de la pieza final, una vez desmoldada.",
+            _OPCIONES_MATERIAL,
+            "silicona",
+        )
+
+    def _preguntar_cavidades(defecto: int) -> int:
+        return preguntar_entero_minimo_uno(
+            "Número de cavidades", "Cuántas figuras caben en una sola cubeta.", defecto
+        )
+
+    def _preguntar_cantidad() -> int:
+        return preguntar_entero_minimo_uno(
+            "Cantidad a producir", "Cuántas piezas finales se van a producir en total.", 1
+        )
+
+    def _preguntar_fecha_entrega() -> date:
+        return preguntar_fecha(
+            "Fecha de entrega",
+            "Cuándo tiene que estar lista la pieza.",
+            date.today() + timedelta(days=21),
+        )
+
+    def _validar_licencia(valor: str) -> None:
+        try:
+            _validar_eleccion(valor, "--licencia", LICENCIAS)
+        except AltaError as exc:
+            raise ValueError(str(exc)) from exc
+
+    def _preguntar_licencia() -> str:
+        return preguntar_texto(
+            "Licencia del modelo base",
+            f"Opciones: {', '.join(LICENCIAS)}.",
+            "propio",
+            validar=_validar_licencia,
+        )
+
+    def _validar_origen(valor: str) -> None:
+        if not valor.strip():
+            raise ValueError("no puede estar vacío: describe de dónde viene el modelo base.")
+
+    def _preguntar_origen() -> str:
+        return preguntar_texto(
+            "Origen del modelo base",
+            "De dónde viene el modelo 3D (p. ej. «dibujo del cliente», «escultura propia»).",
+            "dibujo del cliente",
+            validar=_validar_origen,
+        )
+
+    # --- 1. Nombre --------------------------------------------------------
+    if args.nombre is not None:
+        try:
+            _validar_nombre_disponible(args.nombre)
+        except ValueError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+        nombre = args.nombre
+    else:
+        nombre = _preguntar_nombre()
+
+    # --- 2. Brief -----------------------------------------------------------
+    if args.brief is not None:
+        try:
+            _validar_brief_existe(args.brief)
+        except ValueError as exc:
+            print(f"Error: --brief {exc}", file=sys.stderr)
+            return 1
+        brief = Path(_limpiar_ruta(args.brief))
+        _informar_insumos_brief(brief)
+    else:
+        brief = _preguntar_brief()
+
+    # --- 3. Qué imprime castkit (modo de matriz) ---------------------------
+    if args.modo:
+        try:
+            modo = validar_modo_matriz(args.modo.strip().lower())
+        except MatrizError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+    else:
+        modo = _preguntar_modo()
+
+    # --- 4. Tipo de pieza -> tipo de molde + proveedor ----------------------
+    tipo_molde_detectado = _determinar_tipo_molde(
+        tipo_molde_arg=args.tipo_molde,
+        alto_mm_arg=args.alto_mm,
+        largo_mm_arg=args.largo_mm,
+        grosor_mm_arg=args.grosor_mm,
+    )
+    proveedor_arg = args.proveedor.strip() if args.proveedor else None
+
+    try:
+        if proveedor_arg is not None:
+            proveedor = proveedor_arg
+            if tipo_molde_detectado is not None:
+                tipo_molde = _validar_eleccion(tipo_molde_detectado, "--tipo-molde", TIPOS_MOLDE)
+            else:
+                tipo_molde = preguntar_opcion_numerada(
+                    "Tipo de molde", None, tuple((t, t) for t in TIPOS_MOLDE), "abierto"
+                )
+        elif tipo_molde_detectado is not None:
+            tipo_molde = _validar_eleccion(tipo_molde_detectado, "--tipo-molde", TIPOS_MOLDE)
+            proveedor = None
+        else:
+            tipo_molde, proveedor = _preguntar_tipo_pieza()
+    except AltaError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    # --- 5. Medidas del tipo de molde efectivo ------------------------------
+    alto_mm = largo_mm = grosor_mm = None
+    try:
+        if tipo_molde == "completo":
+            alto_mm = (
+                _parsear_numero_positivo(args.alto_mm, "--alto-mm")
+                if args.alto_mm is not None
+                else _preguntar_alto()
+            )
+        else:
+            largo_mm = (
+                _parsear_numero_positivo(args.largo_mm, "--largo-mm")
+                if args.largo_mm is not None
+                else _preguntar_largo()
+            )
+            grosor_mm = (
+                _parsear_numero_positivo(args.grosor_mm, "--grosor-mm")
+                if args.grosor_mm is not None
+                else _preguntar_grosor(largo_mm)
+            )
+    except AltaError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    # --- 6. Material de la pieza final -------------------------------------
+    try:
+        material = (
+            _validar_eleccion(args.material.strip().lower(), "--material", MATERIALES)
+            if args.material is not None
+            else _preguntar_material()
+        )
+    except AltaError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    # --- 7. Cavidades (solo si cubeta; en figura se registra 1) ------------
+    if modo == "figura":
+        cavidades = 1
+    else:
+        try:
+            cavidades = (
+                _parsear_entero_minimo_uno(args.cavidades, "--cavidades")
+                if args.cavidades is not None
+                else _preguntar_cavidades(1)
+            )
+        except AltaError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+
+    # --- 8. Cantidad ---------------------------------------------------------
+    try:
+        cantidad = (
+            _parsear_entero_minimo_uno(args.cantidad, "--cantidad")
+            if args.cantidad is not None
+            else _preguntar_cantidad()
+        )
+    except AltaError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    # --- 9. Fecha de entrega -------------------------------------------------
+    try:
+        fecha = _parsear_fecha(args.fecha) if args.fecha is not None else _preguntar_fecha_entrega()
+    except AltaError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    # --- 10. Licencia ---------------------------------------------------------
+    try:
+        licencia = (
+            _validar_eleccion(args.licencia.strip().lower(), "--licencia", LICENCIAS)
+            if args.licencia is not None
+            else _preguntar_licencia()
+        )
+    except AltaError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    # --- 11. Origen ------------------------------------------------------------
+    origen = args.origen if args.origen is not None else _preguntar_origen()
+
+    # --- Resumen numerado, editable antes de crear el diseño ----------------
+    def _lineas_resumen() -> list[str]:
+        if tipo_molde == "completo":
+            medida_txt = f"alto {formatear_numero(alto_mm)} mm"
+        else:
+            medida_txt = (
+                f"largo {formatear_numero(largo_mm)} mm, grosor {formatear_numero(grosor_mm)} mm"
+            )
+        proveedor_txt = proveedor if proveedor else "sin asignar"
+        return [
+            f"Nombre: {nombre}",
+            f"Carpeta del brief: {brief}",
+            f"Qué imprime castkit: {modo}",
+            f"Tipo de molde: {tipo_molde} (proveedor: {proveedor_txt})",
+            f"Medidas: {medida_txt}",
+            f"Material de la pieza final: {material}",
+            f"Cavidades: {cavidades}",
+            f"Cantidad a producir: {cantidad}",
+            f"Fecha de entrega: {fecha.isoformat()}",
+            f"Licencia del modelo base: {licencia}",
+            f"Origen del modelo base: {origen}",
+        ]
+
+    while True:
+        lineas = _lineas_resumen()
+        print("\nResumen del diseño:")
+        for indice, linea in enumerate(lineas, start=1):
+            print(f"{indice}. {linea}")
+
+        respuesta = (
+            input("¿Crear el diseño? (S/n, o el número de la línea que quieres cambiar): ")
+            .strip()
+            .lower()
+        )
+
+        if not respuesta or respuesta in ("s", "si", "sí"):
+            break
+        if respuesta in ("n", "no"):
+            print("No se ha creado nada.", file=sys.stderr)
+            return 1
+        if respuesta.isdigit() and 1 <= int(respuesta) <= len(lineas):
+            indice_editar = int(respuesta)
+            if indice_editar == 1:
+                nombre = _preguntar_nombre()
+            elif indice_editar == 2:
+                brief = _preguntar_brief()
+            elif indice_editar == 3:
+                modo = _preguntar_modo()
+                if modo == "figura":
+                    cavidades = 1
+                else:
+                    cavidades = _preguntar_cavidades(cavidades if cavidades else 1)
+            elif indice_editar == 4:
+                tipo_molde, proveedor = _preguntar_tipo_pieza()
+                if tipo_molde == "completo":
+                    alto_mm = _preguntar_alto()
+                    largo_mm = grosor_mm = None
+                else:
+                    largo_mm = _preguntar_largo()
+                    grosor_mm = _preguntar_grosor(largo_mm)
+                    alto_mm = None
+            elif indice_editar == 5:
+                if tipo_molde == "completo":
+                    alto_mm = _preguntar_alto()
+                else:
+                    largo_mm = _preguntar_largo()
+                    grosor_mm = _preguntar_grosor(largo_mm)
+            elif indice_editar == 6:
+                material = _preguntar_material()
+            elif indice_editar == 7:
+                if modo == "figura":
+                    print(
+                        "Las cavidades están fijas en 1 porque el modo es «figura»; "
+                        "cambia la línea 3 si necesitas una cubeta con varias."
+                    )
+                else:
+                    cavidades = _preguntar_cavidades(cavidades)
+            elif indice_editar == 8:
+                cantidad = _preguntar_cantidad()
+            elif indice_editar == 9:
+                fecha = _preguntar_fecha_entrega()
+            elif indice_editar == 10:
+                licencia = _preguntar_licencia()
+            elif indice_editar == 11:
+                origen = _preguntar_origen()
+            continue
+        print(f"Respuesta inválida: escribe «s», «n» o un número de línea entre 1 y {len(lineas)}.")
+
+    try:
+        datos = DatosAlta(
+            nombre=nombre,
+            brief=brief,
+            material=material,
+            alto_mm=alto_mm,
+            cavidades=cavidades,
+            cantidad=cantidad,
+            fecha=fecha,
+            licencia=licencia,
+            origen=origen,
+            tipo_molde=tipo_molde,
+            largo_mm=largo_mm,
+            grosor_mm=grosor_mm,
+            proveedor=proveedor,
+            modo_matriz=modo,
+        )
+        ruta = crear_diseno(datos, destino=destino)
+    except AltaError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"Diseño «{nombre}» creado en {ruta}.")
+    print(f"Siguiente paso: castkit flujo {nombre}")
     return 0
 
 
@@ -1052,6 +1518,11 @@ def _ejecutar_matriz(args: argparse.Namespace) -> int:
         return 1
 
     modo = args.modo
+    if not modo:
+        # Sin --modo explícito, se usa el guardado en la versión actual (lo
+        # dejó `castkit alta` o `castkit version`, ticket #65) antes de
+        # preguntar o fallar; un diseño sin uno guardado se comporta como hoy.
+        modo = datos_version(cargar_diseno(carpeta)).get("modo_matriz")
     if not modo:
         if sys.stdin.isatty():
             modo = (
