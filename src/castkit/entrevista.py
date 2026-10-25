@@ -148,9 +148,7 @@ def preguntar_fecha(etiqueta: str, explicacion: str | None, defecto: date) -> da
         try:
             fecha = date.fromisoformat(valor)
         except ValueError:
-            raise ValueError(
-                f'debe ser una fecha AAAA-MM-DD válida; recibido "{valor}".'
-            ) from None
+            raise ValueError(f'debe ser una fecha AAAA-MM-DD válida; recibido "{valor}".') from None
         if fecha < date.today():
             raise ValueError(f'debe ser hoy o una fecha futura; recibido "{valor}".')
         return fecha

@@ -608,9 +608,7 @@ def _ejecutar_alta(args: argparse.Namespace) -> int:
         cantidad = _parsear_entero_minimo_uno(valores["cantidad"], "--cantidad")
         fecha = _parsear_fecha(valores["fecha"])
         brief = _limpiar_ruta(valores["brief"])
-        modo_matriz = (
-            validar_modo_matriz(args.modo.strip().lower()) if args.modo else None
-        )
+        modo_matriz = validar_modo_matriz(args.modo.strip().lower()) if args.modo else None
         proveedor = args.proveedor.strip() if args.proveedor else None
 
         if tipo_molde == "completo":
@@ -937,9 +935,7 @@ def _ejecutar_alta_guiada(args: argparse.Namespace) -> int:
 
     # --- 9. Fecha de entrega -------------------------------------------------
     try:
-        fecha = (
-            _parsear_fecha(args.fecha) if args.fecha is not None else _preguntar_fecha_entrega()
-        )
+        fecha = _parsear_fecha(args.fecha) if args.fecha is not None else _preguntar_fecha_entrega()
     except AltaError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -987,9 +983,11 @@ def _ejecutar_alta_guiada(args: argparse.Namespace) -> int:
         for indice, linea in enumerate(lineas, start=1):
             print(f"{indice}. {linea}")
 
-        respuesta = input(
-            "¿Crear el diseño? (S/n, o el número de la línea que quieres cambiar): "
-        ).strip().lower()
+        respuesta = (
+            input("¿Crear el diseño? (S/n, o el número de la línea que quieres cambiar): ")
+            .strip()
+            .lower()
+        )
 
         if not respuesta or respuesta in ("s", "si", "sí"):
             break
@@ -1042,9 +1040,7 @@ def _ejecutar_alta_guiada(args: argparse.Namespace) -> int:
             elif indice_editar == 11:
                 origen = _preguntar_origen()
             continue
-        print(
-            f"Respuesta inválida: escribe «s», «n» o un número de línea entre 1 y {len(lineas)}."
-        )
+        print(f"Respuesta inválida: escribe «s», «n» o un número de línea entre 1 y {len(lineas)}.")
 
     try:
         datos = DatosAlta(
