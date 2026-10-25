@@ -223,7 +223,7 @@ def test_comprobar_con_blender_y_config_ok_devuelve_cero(
 
     assert codigo == 0
     salida = capsys.readouterr().out
-    assert "Blender: /usr/bin/blender" in salida
+    assert f"Blender: {Path('/usr/bin/blender')}" in salida
     assert "Versión instalada: Blender 5.2.2" in salida
     assert "La configuración es válida." in salida
 
