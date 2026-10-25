@@ -661,3 +661,127 @@ def test_respaldo_blender_real_nunca_escribe_una_figura_deformada(
     tolerancia = registro["tolerancia_mm"]
     assert limpia.extents[2] == pytest.approx(13.5, abs=tolerancia)
     assert limpia.extents[:2] == pytest.approx(original.extents[:2], abs=tolerancia)
+
+
+# ---------------------------------------------------------------------------
+# Criterio (#52): medir la distancia máxima contra mallas de millones de
+# caras no debe agotar la memoria. `_distancias_a_superficie` reparte el
+# trabajo de `_distancia_maxima` en bloques en vez de construir de una vez el
+# array puntos × triángulos de `closest_point_naive`.
+# ---------------------------------------------------------------------------
+
+
+def test_distancias_a_superficie_coincide_con_closest_point_naive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """El helper troceado da la misma distancia que `closest_point_naive`."""
+    import castkit.limpieza as mod_limpieza
+
+    malla = trimesh.creation.icosphere(subdivisions=2)
+    puntos, _ = trimesh.sample.sample_surface(
+        trimesh.creation.icosphere(subdivisions=3), 50, seed=1
+    )
+
+    _, distancia_naive, _ = trimesh.proximity.closest_point_naive(malla, puntos)
+    distancia_bloques = mod_limpieza._distancias_a_superficie(malla, puntos)
+    assert distancia_bloques == pytest.approx(distancia_naive, abs=1e-6)
+
+    # Tope de pares muy bajo: fuerza a trocear tanto los puntos como los
+    # triángulos (hasta un solo punto supera el tope contra todos los
+    # triángulos de esta malla pequeña).
+    monkeypatch.setattr(mod_limpieza, "_TOPE_PARES_DISTANCIA", 7)
+    distancia_troceada = mod_limpieza._distancias_a_superficie(malla, puntos)
+    assert distancia_troceada == pytest.approx(distancia_naive, abs=1e-6)
+
+
+def test_distancia_maxima_con_malla_de_millones_de_caras_no_agota_la_memoria() -> None:
+    """Pico de memoria de `_distancia_maxima` con una malla de ≥1 M caras.
+
+    Con el código anterior (un solo `closest_point_naive` por cada sentido,
+    con el array puntos × triángulos completo), medir esta misma pareja de
+    mallas con `n_muestras=300` (el valor por defecto) construye un array de
+    300 puntos × 1 310 720 triángulos ≈ 9,4 GB (300 * 1_310_720 * 3 * 8
+    bytes, antes de cualquier copia intermedia). Aquí se usa `n_muestras`
+    más bajo para que el test corra en segundos; el troceo por bloques es
+    el mismo con cualquier `n_muestras`, así que el pico de memoria no
+    depende de cuántos puntos se muestreen, solo del tamaño de cada bloque.
+    """
+    import tracemalloc
+
+    from castkit.limpieza import _distancia_maxima
+
+    referencia = trimesh.creation.icosphere(subdivisions=8)
+    assert len(referencia.faces) >= 1_000_000
+    limpia = trimesh.creation.icosphere(subdivisions=3, radius=0.99)
+
+    tracemalloc.start()
+    try:
+        distancia = _distancia_maxima(referencia, limpia, [], n_muestras=15)
+    finally:
+        _, pico = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+
+    assert distancia > 0.0
+    assert pico < 500 * 1024 * 1024
+
+
+# ---------------------------------------------------------------------------
+# Criterio (#52): si la malla remallada por Blender supera `caras_max`, se
+# simplifica antes de medir `distancia_remallado_mm` (y el resto del flujo
+# parte ya de la malla simplificada).
+# ---------------------------------------------------------------------------
+
+
+def test_respaldo_blender_que_supera_caras_max_se_simplifica_antes_de_medir(
+    disenos_dir: Path, brief_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import castkit.limpieza as mod_limpieza
+
+    rellenar_de_verdad = trimesh.repair.fill_holes
+
+    def _remallado_con_muchas_caras(malla: trimesh.Trimesh, voxel_mm: float) -> trimesh.Trimesh:
+        cerrada = malla.copy()
+        rellenar_de_verdad(cerrada, use_fan=True)
+        trimesh.repair.fix_normals(cerrada)
+        # Subdividir no cambia la superficie de una malla de caras planas
+        # (los vértices nuevos quedan exactamente en el plano de cada
+        # cara): simula un remallado por vóxeles fino que deja muchas más
+        # caras que `caras_max` sin alterar la figura.
+        vertices, caras = cerrada.vertices, cerrada.faces
+        for _ in range(3):
+            vertices, caras = trimesh.remesh.subdivide(vertices, caras)
+        return trimesh.Trimesh(vertices=vertices, faces=caras, process=False)
+
+    # Python "no consigue" cerrar agujeros.stl, igual que en los tests de
+    # respaldo de Blender existentes, para forzar el camino de Blender.
+    monkeypatch.setattr(trimesh.repair, "fill_holes", lambda malla, **kwargs: False)
+    _blender_disponible(monkeypatch)
+    monkeypatch.setattr(mod_limpieza, "_remallar_con_blender", _remallado_con_muchas_caras)
+    _dar_alta("guagua-pan", brief_dir, alto_mm=13.5)
+    assert main(_argv_ingesta("guagua-pan", str(AGUJEROS_STL))) == 0
+
+    caras_max = 500
+    codigo = main(
+        [
+            *_argv_limpieza("guagua-pan", caras_max=str(caras_max), tolerancia_mm="2.0"),
+            "--voxel-mm",
+            "0.25",
+        ]
+    )
+
+    assert codigo == 0
+    destino = disenos_dir / "guagua-pan" / "work" / "guagua-pan_v1_limpia.stl"
+    limpia = trimesh.load(destino, force="mesh")
+    assert len(limpia.faces) <= caras_max
+
+    registro = cargar_diseno(disenos_dir / "guagua-pan")["versiones"]["v1"]["parametros"][
+        "limpieza"
+    ]
+    assert registro["metodo"] == "blender"
+    assert registro["caras"] <= caras_max
+    # Si la distancia registrada se hubiera medido contra el remallado SIN
+    # simplificar (idéntico a la original, por construcción de
+    # `_remallado_con_muchas_caras`), sería ~0: que sea claramente positiva
+    # confirma que la medición incluyó la decimación a `caras_max` caras.
+    assert registro["distancia_max_mm"] > 0.01
+    assert registro["distancia_max_mm"] <= registro["tolerancia_mm"]
