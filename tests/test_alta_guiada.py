@@ -455,7 +455,7 @@ def test_resumen_con_numero_de_linea_repregunta_solo_esa(
     respuestas = (
         ["toro", str(brief_con_imagen)]
         + [""] * 10  # modo..origen, todo por defecto
-        + ["8", "25"]  # en el resumen: editar la línea 8 (cantidad) -> 25
+        + ["9", "25"]  # en el resumen: editar la línea 9 (cantidad) -> 25
         + [""]  # segundo resumen: Intro = crear
     )
     _simular_respuestas(monkeypatch, respuestas)

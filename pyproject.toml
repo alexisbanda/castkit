@@ -52,6 +52,15 @@ explicit = true
 [tool.hatch.build.targets.wheel]
 packages = ["src/castkit"]
 
+[tool.hatch.build.targets.wheel.force-include]
+# La configuración de fabricación y la versión de Blender fijada no viven
+# dentro de `src/castkit` (para no duplicarlas: el repo ya las tiene en
+# `config/` y en la raíz, ver #64), pero el wheel instalado las necesita
+# para poder crear la copia del usuario con `importlib.resources`
+# (`castkit.config.ruta_config_fabricacion`/`version_blender_fijada`).
+"config/fabricacion.toml" = "castkit/datos/fabricacion.toml"
+".blender-version" = "castkit/datos/blender-version"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [

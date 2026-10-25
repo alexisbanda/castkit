@@ -8,6 +8,24 @@ from PIL import Image
 
 from castkit.blender import BlenderNotFoundError, find_blender
 
+_RAIZ = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture(autouse=True)
+def _config_fabricacion_de_prueba(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fija `CASTKIT_FABRICACION_TOML` al toml del repo para toda la suite (#64).
+
+    Sin esto, `ruta_config_fabricacion()` iría a la carpeta de configuración
+    del usuario (y, si no existiera ahí, la crearía) cada vez que un test
+    carga una sección de `config/fabricacion.toml`, lo que escribiría fuera
+    del repositorio y fuera del control de los tests. Se aplica a cada test
+    automáticamente (vía `monkeypatch`, que deshace el cambio al terminar);
+    un test que necesite otro valor (o ninguno) puede pisarlo con su propio
+    `monkeypatch.setenv`/`delenv` en el cuerpo del test, sin que esta fixture
+    se lo impida.
+    """
+    monkeypatch.setenv("CASTKIT_FABRICACION_TOML", str(_RAIZ / "config" / "fabricacion.toml"))
+
 
 def pytest_runtest_setup(item: pytest.Item) -> None:
     if "blender" in item.keywords:
