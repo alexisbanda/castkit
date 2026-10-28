@@ -20,7 +20,9 @@ from pathlib import Path
 from castkit.cli import _construir_parser
 
 _RAIZ = Path(__file__).resolve().parents[1]
-_README = (_RAIZ / "README.md").read_text(encoding="utf-8")
+_RUTA_README = _RAIZ / "README.md"
+_README = _RUTA_README.read_text(encoding="utf-8")
+_GUIA_OPERADOR = _RAIZ / "docs" / "guia-operador.md"
 
 
 def test_subcomandos_y_opciones_de_la_cli_estan_en_el_readme() -> None:
@@ -76,10 +78,10 @@ def _slug_github(encabezado: str) -> str:
     return re.sub(r"\s+", "-", texto)
 
 
-def _anclas_disponibles() -> set[str]:
+def _anclas_disponibles(texto: str = _README) -> set[str]:
     anclas: set[str] = set()
     contador: dict[str, int] = {}
-    for linea in _README.splitlines():
+    for linea in texto.splitlines():
         coincidencia = re.match(r"^#{1,6}\s+(.*)$", linea)
         if not coincidencia:
             continue
@@ -109,3 +111,53 @@ def test_enlaces_internos_del_readme_apuntan_a_algo_que_existe() -> None:
             rotos.append(f"ruta {destino} (no existe en el repositorio)")
 
     assert not rotos, "Enlaces internos rotos en README.md: " + ", ".join(rotos)
+
+
+def test_el_readme_enlaza_la_guia_del_operador() -> None:
+    assert "docs/guia-operador.md" in _README, (
+        "README.md debería enlazar docs/guia-operador.md (la guía del operador, #66)."
+    )
+
+
+def test_existe_la_guia_del_operador() -> None:
+    assert _GUIA_OPERADOR.is_file(), "Falta docs/guia-operador.md (#66)."
+
+
+def test_enlaces_e_imagenes_de_la_guia_del_operador_apuntan_a_algo_que_existe() -> None:
+    """Los enlaces relativos e imágenes de `docs/guia-operador.md` se resuelven contra
+    `docs/` (la carpeta donde vive el archivo), igual que lo haría GitHub."""
+
+    texto_guia = _GUIA_OPERADOR.read_text(encoding="utf-8")
+    anclas_propias = _anclas_disponibles(texto_guia)
+    base = _GUIA_OPERADOR.parent
+
+    rotos: list[str] = []
+    for destino in re.findall(r"\]\(([^)]+)\)", texto_guia):
+        if destino.startswith(("http://", "https://", "mailto:")):
+            continue
+
+        ruta_str, _, ancla = destino.partition("#")
+
+        if not ruta_str:
+            # Enlace a un ancla de la propia guía (p. ej. "#7-cuando-algo-falla").
+            if ancla not in anclas_propias:
+                rotos.append(f"ancla #{ancla} (sin encabezado correspondiente en la guía)")
+            continue
+
+        ruta = (base / ruta_str).resolve()
+        if not ruta.exists():
+            rotos.append(f"ruta {destino} (no existe en el repositorio)")
+            continue
+
+        if ancla:
+            anclas_destino = _anclas_disponibles(ruta.read_text(encoding="utf-8"))
+            if ancla not in anclas_destino:
+                rotos.append(f"ancla {destino} (sin encabezado correspondiente)")
+
+    assert not rotos, "Enlaces rotos en docs/guia-operador.md: " + ", ".join(rotos)
+
+
+def test_las_imagenes_de_docs_img_pesan_500_kb_o_menos_en_total() -> None:
+    carpeta_img = _RAIZ / "docs" / "img"
+    total = sum(p.stat().st_size for p in carpeta_img.glob("*") if p.is_file())
+    assert total <= 500 * 1024, f"docs/img pesa {total / 1024:.1f} KB en total; debe ser ≤ 500 KB."
