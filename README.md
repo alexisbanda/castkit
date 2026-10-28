@@ -8,6 +8,9 @@ texto o una malla ya hecha) obtiene la malla en bruto, la limpia y escala, gener
 punto de control 1 para aprobarla, y produce la matriz `.stl` lista para imprimir junto con su
 ficha técnica.
 
+**¿Primera vez?** Sigue la [guía del operador](docs/guia-operador.md), un pedido paso a paso
+desde la instalación hasta la matriz.
+
 El flujo, en una línea: `alta → generar → limpieza → control1 → matriz` (con `mecha` para
 figuras de cera, y `flujo` para encadenarlo todo de una vez). `castkit version` crea una nueva
 versión de un diseño ya existente; `castkit ingesta` se usa en vez de `generar` cuando ya se
@@ -40,8 +43,7 @@ Límites actuales: los proveedores locales esperan un fondo liso o transparente
 ([#54](https://github.com/alexisbanda/castkit/issues/54), [#57](https://github.com/alexisbanda/castkit/issues/57));
 `imagen-3d` da figuras toscas; `tripo3d` necesita saldo en la API de Tripo (variable de entorno
 `TRIPO_API_KEY`); el remallado de respaldo de Blender casi nunca es fiel
-([#28](https://github.com/alexisbanda/castkit/issues/28)). Tampoco se instala todavía como
-comando independiente ([#64](https://github.com/alexisbanda/castkit/issues/64)).
+([#28](https://github.com/alexisbanda/castkit/issues/28)).
 
 ### Qué proveedor elegir
 
