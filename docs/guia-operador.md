@@ -284,6 +284,6 @@ Si escribes una fecha o una medida con un formato que castkit no reconoce (al da
 ```
 
 **Qué hacer**: corrige el valor con el formato pedido (la fecha, como `2026-11-15`; las medidas,
-un número mayor que 0, con punto o coma decimal) y repite el comando. Si en cambio usas la
+un número mayor que 0, con punto decimal, como `12.5`) y repite el comando. Si en cambio usas la
 entrevista guiada del paso 3, castkit te avisa del mismo problema ahí mismo y repite solo esa
 pregunta, sin perder las respuestas anteriores.
