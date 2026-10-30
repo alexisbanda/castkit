@@ -15,7 +15,11 @@ import os
 import subprocess
 import sys
 
-from castkit.blender import BlenderNotFoundError, find_blender
+from castkit.blender import (
+    BlenderNotFoundError,
+    localizar_blender,
+    mensaje_blender_no_encontrado,
+)
 from castkit.config import (
     ConfigError,
     cargar_config_generacion,
@@ -53,15 +57,12 @@ def _comprobar_blender() -> bool:
     """Imprime el estado de Blender; devuelve `True` si está disponible."""
     version_fijada = version_blender_fijada()
     try:
-        ejecutable = find_blender()
+        ejecutable, origen = localizar_blender()
     except BlenderNotFoundError:
-        print(
-            f"No se encuentra Blender {version_fijada}: instálalo desde blender.org "
-            "o define BLENDER_BIN con la ruta del ejecutable"
-        )
+        print(mensaje_blender_no_encontrado())
         return False
 
-    print(f"Blender: {ejecutable}")
+    print(f"Blender: {ejecutable} ({origen})")
     version_instalada = _version_instalada_blender(ejecutable)
     if version_instalada is None:
         print(f"Aviso: no se pudo obtener la versión de «{ejecutable}».")
