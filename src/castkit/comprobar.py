@@ -123,7 +123,9 @@ def _comprobar_carpeta_disenos() -> None:
     if origen_carpeta_disenos() == "variable":
         print(f"Carpeta de diseños: {carpeta} (variable CASTKIT_DISENOS)")
     else:
-        print(f"Carpeta de diseños: {carpeta} (por defecto; para usar otra, define CASTKIT_DISENOS)")
+        print(
+            f"Carpeta de diseños: {carpeta} (por defecto; para usar otra, define CASTKIT_DISENOS)"
+        )
     raiz_clon = carpeta_bajo_clon_castkit(carpeta)
     if raiz_clon is not None:
         print(

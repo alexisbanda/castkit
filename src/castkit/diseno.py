@@ -99,9 +99,12 @@ def _documentos_windows() -> Path | None:
             ]
 
         guid = _GUID()
-        if ctypes.windll.ole32.CLSIDFromString(  # type: ignore[attr-defined]
-            "{FDD39AD0-238F-46AF-ADB4-6C85480369C7}", ctypes.byref(guid)
-        ) != 0:
+        if (
+            ctypes.windll.ole32.CLSIDFromString(  # type: ignore[attr-defined]
+                "{FDD39AD0-238F-46AF-ADB4-6C85480369C7}", ctypes.byref(guid)
+            )
+            != 0
+        ):
             return None
 
         buf = ctypes.c_wchar_p()

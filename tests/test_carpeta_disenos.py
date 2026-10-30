@@ -23,7 +23,6 @@ from castkit.diseno import (
 )
 from castkit.versiones import ubicar_diseno
 
-
 # ---------------------------------------------------------------------------
 # carpeta_documentos: Windows
 # ---------------------------------------------------------------------------
@@ -62,7 +61,9 @@ def test_documentos_windows_usa_home_si_tampoco_hay_userprofile(
 # ---------------------------------------------------------------------------
 
 
-def test_documentos_macos_es_home_documents(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_documentos_macos_es_home_documents(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "home-ana")
 
     assert carpeta_documentos(plataforma="darwin") == tmp_path / "home-ana" / "Documents"
@@ -219,7 +220,9 @@ def test_comprobar_muestra_el_origen_por_defecto(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.delenv("CASTKIT_DISENOS", raising=False)
-    monkeypatch.setattr(mod_diseno, "carpeta_documentos", lambda plataforma=None: tmp_path / "Documents")
+    monkeypatch.setattr(
+        mod_diseno, "carpeta_documentos", lambda plataforma=None: tmp_path / "Documents"
+    )
 
     main(["comprobar"])
 
