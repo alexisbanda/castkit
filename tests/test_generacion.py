@@ -21,6 +21,7 @@ from castkit.generacion import (
     InsumosBrief,
     _partir_comando,
     desregistrar_proveedor,
+    mensaje_tripo_api_key_faltante,
     recolectar_insumos_brief,
     registrar_proveedor,
 )
@@ -625,3 +626,41 @@ def test_tripo3d_v3_http_error_durante_sondeo_no_escribe_malla(
 
     assert not (carpeta / "input" / "guagua-pan_v1_bruto.stl").exists()
     assert "generacion" not in cargar_diseno(carpeta)["versiones"]["v1"]["parametros"]
+
+
+# ---------------------------------------------------------------------------
+# `mensaje_tripo_api_key_faltante()`: texto según la plataforma (#78).
+# ---------------------------------------------------------------------------
+
+
+def test_mensaje_tripo_api_key_faltante_windows_explica_setx() -> None:
+    mensaje = mensaje_tripo_api_key_faltante("win32")
+
+    assert "setx TRIPO_API_KEY" in mensaje
+    assert "terminal nueva" in mensaje
+    assert "export TRIPO_API_KEY" not in mensaje
+
+
+def test_mensaje_tripo_api_key_faltante_resto_explica_export() -> None:
+    mensaje = mensaje_tripo_api_key_faltante("linux")
+
+    assert "export TRIPO_API_KEY" in mensaje
+    assert "setx" not in mensaje
+
+
+def test_tripo3d_sin_api_key_usa_el_mensaje_segun_la_plataforma(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Sin `TRIPO_API_KEY`, el error de `castkit generar` usa `mensaje_tripo_api_key_faltante`."""
+    _crear_diseno_con_brief(
+        tmp_path,
+        monkeypatch,
+        {"idea.txt": "Vela con forma de guagua de pan"},
+    )
+    monkeypatch.delenv("TRIPO_API_KEY", raising=False)
+
+    rc = main(["generar", "guagua-pan", "--proveedor", "tripo3d"])
+
+    assert rc != 0
+    err = capsys.readouterr().err
+    assert "TRIPO_API_KEY" in err

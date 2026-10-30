@@ -88,8 +88,8 @@ def _comprobar_extra_profundidad() -> None:
         print(
             "Extra «profundidad»: no instalado (opcional; solo lo necesita "
             "`castkit generar --proveedor profundidad`). Para instalarlo: "
-            "`uv tool install 'castkit[profundidad] @ "
-            "git+ssh://git@github.com/alexisbanda/castkit.git'`, o `uv sync --extra profundidad` "
+            '`uv tool install --reinstall "castkit[profundidad] @ '
+            'git+https://github.com/alexisbanda/castkit.git"`, o `uv sync --extra profundidad` '
             "en un clon."
         )
 

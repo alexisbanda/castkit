@@ -106,9 +106,16 @@ def test_enlaces_internos_del_readme_apuntan_a_algo_que_existe() -> None:
                 rotos.append(f"ancla #{ancla} (sin encabezado correspondiente)")
             continue
 
-        ruta = (_RAIZ / destino).resolve()
+        ruta_str, _, ancla = destino.partition("#")
+        ruta = (_RAIZ / ruta_str).resolve()
         if not ruta.exists():
             rotos.append(f"ruta {destino} (no existe en el repositorio)")
+            continue
+
+        if ancla:
+            anclas_destino = _anclas_disponibles(ruta.read_text(encoding="utf-8"))
+            if ancla not in anclas_destino:
+                rotos.append(f"ancla {destino} (sin encabezado correspondiente)")
 
     assert not rotos, "Enlaces internos rotos en README.md: " + ", ".join(rotos)
 
@@ -161,3 +168,25 @@ def test_las_imagenes_de_docs_img_pesan_500_kb_o_menos_en_total() -> None:
     carpeta_img = _RAIZ / "docs" / "img"
     total = sum(p.stat().st_size for p in carpeta_img.glob("*") if p.is_file())
     assert total <= 500 * 1024, f"docs/img pesa {total / 1024:.1f} KB en total; debe ser ≤ 500 KB."
+
+
+def test_ningun_uv_tool_install_con_comillas_simples() -> None:
+    """`uv tool install 'castkit ...'` falla en cmd en Windows (#78): solo comillas dobles.
+
+    Comprueba README.md, docs/guia-operador.md y todo `src/castkit/**/*.py`.
+    """
+    patron = re.compile(r"uv tool install '")
+
+    rutas = [_RUTA_README, _GUIA_OPERADOR, *sorted((_RAIZ / "src" / "castkit").rglob("*.py"))]
+
+    encontrados: list[str] = []
+    for ruta in rutas:
+        texto = ruta.read_text(encoding="utf-8")
+        for numero, linea in enumerate(texto.splitlines(), start=1):
+            if patron.search(linea):
+                encontrados.append(f"{ruta.relative_to(_RAIZ)}:{numero}")
+
+    assert not encontrados, (
+        "«uv tool install '» con comillas simples falla en cmd en Windows (#78); "
+        "usa comillas dobles. Encontrado en: " + ", ".join(encontrados)
+    )
