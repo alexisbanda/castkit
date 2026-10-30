@@ -1,0 +1,39 @@
+name: Simulación operador Windows
+
+on:
+  push:
+    branches: [sim/windows]
+  workflow_dispatch:
+
+jobs:
+  operador:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Instalar Blender con el instalador .msi (como un usuario)
+        shell: pwsh
+        run: |
+          $v = Get-Content .blender-version
+          $mm = ($v -split '\.')[0..1] -join '.'
+          $msi = "$env:RUNNER_TEMP\blender.msi"
+          Invoke-WebRequest "https://download.blender.org/release/Blender$mm/blender-$v-windows-x64.msi" -OutFile $msi
+          Start-Process msiexec -ArgumentList '/i', $msi, '/qn', '/norestart' -Wait
+          Get-ChildItem 'C:\Program Files\Blender Foundation' -Recurse -Filter blender.exe | Select-Object FullName
+          "¿blender en PATH?: $([bool](Get-Command blender -ErrorAction SilentlyContinue))"
+
+      - name: Simular al operador
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SIM_OUT: ${{ runner.temp }}\sim
+        run: ./sim/windows/simular.ps1
+
+      - name: Subir resultados
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sim-windows
+          path: ${{ runner.temp }}\sim
