@@ -198,10 +198,18 @@ uv run ruff format --check
 
 Castkit localiza el ejecutable de Blender en este orden:
 
-1. La variable de entorno `BLENDER_BIN`, si está definida (debe apuntar a la ruta completa del ejecutable).
+1. La variable de entorno `BLENDER_BIN`, si está definida (debe apuntar a la ruta completa del ejecutable; si la ruta no existe, falla ahí mismo y no sigue buscando).
 2. El comando `blender` disponible en el `PATH` del sistema.
+3. **Solo en Windows:** las carpetas donde deja Blender el instalador oficial (`.msi`) de
+   blender.org, bajo `%ProgramFiles%\Blender Foundation` (`C:\Program Files` si la variable
+   `ProgramFiles` no está definida), probando `Blender */blender.exe`. Si hay varias versiones
+   instaladas, prefiere la que coincide con la versión que castkit fija (ver abajo); si ninguna
+   coincide, usa la más alta.
 
-Si no encuentra ninguno, lanza un error explicando cómo instalar Blender LTS (la versión fijada en `.blender-version`) o cómo configurar `BLENDER_BIN`.
+Si no encuentra ninguno, lanza un error con el número de versión que castkit fija y cómo definir `BLENDER_BIN` de forma permanente:
+
+- **Windows** (PowerShell): `setx BLENDER_BIN "C:\ruta\a\blender.exe"` y abre una terminal nueva (`setx` no afecta a la terminal donde se ejecuta, solo a las que abras después).
+- **Linux/macOS**: añade `export BLENDER_BIN=/ruta/a/blender` a `~/.bashrc` (o el archivo de arranque de tu shell) y abre una terminal nueva.
 
 ## Comprobar la instalación (`castkit comprobar`)
 
@@ -212,10 +220,13 @@ uv run castkit comprobar  # en un clon de desarrollo
 
 Informa, en español y línea a línea:
 
-- **Blender**: la ruta del ejecutable encontrado y su versión (`<blender> --version`), comparada
-  con la fijada en `.blender-version`. Si no encuentra Blender, muestra: «No se encuentra Blender
-  5.2.2: instálalo desde blender.org o define BLENDER_BIN con la ruta del ejecutable». Si la
-  versión instalada no coincide con la fijada, solo avisa (no falla).
+- **Blender**: la ruta del ejecutable encontrado, entre paréntesis de dónde salió (`variable
+  BLENDER_BIN`, `PATH` o, solo en Windows, `carpeta de instalación de Blender`), y su versión
+  (`<blender> --version`), comparada con la fijada en `.blender-version`. Por ejemplo: «Blender:
+  C:\Program Files\Blender Foundation\Blender 5.2\blender.exe (carpeta de instalación de
+  Blender)». Si no encuentra Blender, muestra el mismo mensaje que explica cómo instalarlo o
+  definir `BLENDER_BIN` (ver «Cómo apuntar a Blender», arriba). Si la versión instalada no
+  coincide con la fijada, solo avisa (no falla).
 - **Extra `profundidad`**: si `torch` y `transformers` están instalados, y cómo instalarlos si no
   (ver «Instalación para usar castkit» y «Extra opcional `profundidad`», arriba). Nunca hace
   fallar la comprobación.

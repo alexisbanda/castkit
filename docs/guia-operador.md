@@ -212,13 +212,22 @@ Lo vas a ver al correr `castkit control1` o `castkit flujo` (el punto de control
 Blender siempre, sin alternativa):
 
 ```text
-No se puede generar el punto de control 1 sin Blender: No se encontró el ejecutable de Blender. Instala Blender LTS (la versión requerida está fijada en el archivo .blender-version) y asegúrate de que el comando 'blender' esté en el PATH, o bien configura la variable de entorno BLENDER_BIN con la ruta completa al ejecutable de Blender.
+No se puede generar el punto de control 1 sin Blender: No se encuentra Blender 5.2.2: instálalo desde blender.org y asegúrate de que el comando 'blender' esté en el PATH, o bien define la variable de entorno BLENDER_BIN con la ruta completa al ejecutable, por ejemplo añadiendo `export BLENDER_BIN=/ruta/a/blender` a ~/.bashrc y abriendo una terminal nueva.
 ```
 
-**Qué hacer**: instala Blender LTS en la versión fijada (puedes verla ejecutando `castkit
-comprobar`, que también la compara con la que tengas instalada) o define la variable de entorno
-`BLENDER_BIN` con la ruta completa al ejecutable. Más sobre cómo castkit busca Blender, en el
-README, sección [«Cómo apuntar a Blender»](../README.md#cómo-apuntar-a-blender).
+**Qué hacer**: instala Blender en la versión fijada (puedes verla ejecutando `castkit comprobar`,
+que también la compara con la que tengas instalada).
+
+- **Windows**: si lo instalaste con el instalador de blender.org (el `.msi`), castkit lo
+  encuentra solo, sin que tengas que hacer nada más. Si lo instalaste en otra carpeta, define
+  `BLENDER_BIN` en PowerShell: `setx BLENDER_BIN "C:\ruta\a\blender.exe"` y abre una terminal
+  nueva.
+- **Linux/macOS**: define la variable de entorno `BLENDER_BIN` con la ruta completa al
+  ejecutable, por ejemplo añadiendo `export BLENDER_BIN=/ruta/a/blender` a `~/.bashrc` y abriendo
+  una terminal nueva.
+
+Más sobre cómo castkit busca Blender, en el README, sección [«Cómo apuntar a
+Blender»](../README.md#cómo-apuntar-a-blender).
 
 ### El extra `profundidad` no está instalado
 

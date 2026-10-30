@@ -206,7 +206,11 @@ def test_carpeta_bajo_clon_castkit_devuelve_none_fuera_del_repo(tmp_path: Path) 
 def _blender_falso(monkeypatch: pytest.MonkeyPatch, *, version: str = "5.2.2") -> None:
     import castkit.comprobar as comprobar_mod
 
-    monkeypatch.setattr(comprobar_mod, "find_blender", lambda: Path("/usr/bin/blender"))
+    monkeypatch.setattr(
+        comprobar_mod,
+        "localizar_blender",
+        lambda: (Path("/usr/bin/blender"), "PATH"),
+    )
 
     class _ProcesoFalso:
         stdout = f"Blender {version} (hash abc1234)\n"
@@ -223,7 +227,7 @@ def test_comprobar_con_blender_y_config_ok_devuelve_cero(
 
     assert codigo == 0
     salida = capsys.readouterr().out
-    assert f"Blender: {Path('/usr/bin/blender')}" in salida
+    assert f"Blender: {Path('/usr/bin/blender')} (PATH)" in salida
     assert "Versión instalada: Blender 5.2.2" in salida
     assert "La configuración es válida." in salida
 
@@ -232,20 +236,18 @@ def test_comprobar_sin_blender_muestra_el_mensaje_del_ticket_y_falla(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     import castkit.comprobar as comprobar_mod
+    from castkit.blender import mensaje_blender_no_encontrado
 
     def _sin_blender():
         raise BlenderNotFoundError("no encontrado")
 
-    monkeypatch.setattr(comprobar_mod, "find_blender", _sin_blender)
+    monkeypatch.setattr(comprobar_mod, "localizar_blender", _sin_blender)
 
     codigo = main(["comprobar"])
 
     assert codigo != 0
     salida = capsys.readouterr().out
-    assert (
-        "No se encuentra Blender 5.2.2: instálalo desde blender.org "
-        "o define BLENDER_BIN con la ruta del ejecutable"
-    ) in salida
+    assert mensaje_blender_no_encontrado() in salida
 
 
 def test_comprobar_con_config_invalida_falla(
