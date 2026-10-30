@@ -298,6 +298,8 @@ def test_comprobar_informa_extra_profundidad(
     else:
         assert "Extra «profundidad»: no instalado" in salida
         assert "uv tool install" in salida
+        assert "git+https://github.com/alexisbanda/castkit.git" in salida
+        assert "uv tool install '" not in salida
 
 
 def test_comprobar_clave_tripo_presente_no_muestra_su_valor(

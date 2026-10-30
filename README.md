@@ -116,13 +116,28 @@ estimados y 27,1 cm³ de volumen por figura. En `output/` quedan `toro-prof_v1_m
 
 Para usar castkit como herramienta, sin clonar el repositorio, instálalo con
 [uv](https://docs.astral.sh/uv/) directamente desde GitHub (el repositorio es privado: necesita
-acceso SSH):
+Git instalado y que tu cuenta de GitHub esté añadida como colaboradora del repositorio).
+
+**Nota:** esta forma de instalar es provisional, mientras se decide la vía de distribución
+definitiva ([#80](https://github.com/alexisbanda/castkit/issues/80)).
 
 ```bash
-uv tool install 'castkit @ git+ssh://git@github.com/alexisbanda/castkit.git'
+uv tool install "castkit[profundidad] @ git+https://github.com/alexisbanda/castkit.git"
 
-# Con el extra opcional `profundidad` (proveedor de generación 3D, ver más abajo):
-uv tool install 'castkit[profundidad] @ git+ssh://git@github.com/alexisbanda/castkit.git'
+# Sin el extra opcional `profundidad` (proveedor de generación 3D, ver más abajo), para quien no
+# trabaja con medias figuras:
+uv tool install "castkit @ git+https://github.com/alexisbanda/castkit.git"
+```
+
+La primera vez, Git puede abrir el navegador para que inicies sesión en GitHub (es el gestor de
+credenciales de Git, que comprueba el acceso al repositorio); inicia sesión con tu cuenta y sigue.
+Paso a paso, con capturas y qué hacer en Windows, en la [guía del operador, sección «Instalar y
+comprobar»](docs/guia-operador.md#1-instalar-y-comprobar).
+
+Si ya tienes una clave SSH propia en GitHub, puedes usar esa forma en su lugar:
+
+```bash
+uv tool install "castkit[profundidad] @ git+ssh://git@github.com/alexisbanda/castkit.git"
 ```
 
 Esto deja el comando `castkit` disponible en el `PATH` (sin `uv run` por delante). Para
@@ -392,6 +407,18 @@ Por defecto, el diseño se crea en la carpeta actual. Si la variable de entorno
 export CASTKIT_DISENOS=/datos/disenos
 uv run castkit alta guagua-pan --brief ... # se crea en /datos/disenos/guagua-pan
 ```
+
+En Windows (PowerShell), con `setx` (solo afecta a las terminales que abras después; abre una
+terminal nueva antes de usar `castkit alta`):
+
+```powershell
+mkdir "$env:USERPROFILE\Documents\Diseños"
+setx CASTKIT_DISENOS "$env:USERPROFILE\Documents\Diseños"
+```
+
+Más sobre cómo definir esta y otras variables de entorno, con el panel de Windows como
+alternativa a `setx`, en la guía del operador, sección [«Definir una variable de
+entorno»](docs/guia-operador.md#definir-una-variable-de-entorno).
 
 ## Crear una nueva versión de un diseño
 

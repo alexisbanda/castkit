@@ -23,6 +23,7 @@ import os
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.error
@@ -136,6 +137,25 @@ _TRIPO_ESTADOS_FALLO = ("failed", "cancelled", "banned", "expired")
 _TRIPO_INTERVALO_SONDEO_S = 3.0
 
 
+def mensaje_tripo_api_key_faltante(plataforma: str | None = None) -> str:
+    """Mensaje de «falta TRIPO_API_KEY», con el comando propio de cada sistema.
+
+    En Windows explica cómo definirla con `setx` desde PowerShell (y abrir una
+    terminal nueva); en el resto, con `export` en la terminal (mismo patrón
+    que `mensaje_blender_no_encontrado` en `castkit.blender`).
+    """
+    plataforma = plataforma if plataforma is not None else sys.platform
+    if plataforma == "win32":
+        return (
+            'El proveedor "tripo3d" requiere la variable de entorno TRIPO_API_KEY '
+            '(en PowerShell: setx TRIPO_API_KEY "tsk_..." y abre una terminal nueva).'
+        )
+    return (
+        'El proveedor "tripo3d" requiere la variable de entorno TRIPO_API_KEY '
+        '(por ejemplo: export TRIPO_API_KEY="tsk_...").'
+    )
+
+
 class ProveedorTripo3D:
     """Proveedor enchufable para Tripo3D API v3 (soporta Imagen → 3D y Texto → 3D).
 
@@ -199,10 +219,7 @@ class ProveedorTripo3D:
     def generar(self, insumos: InsumosBrief, destino_stl: Path) -> None:
         api_key = os.environ.get("TRIPO_API_KEY", "").strip()
         if not api_key:
-            raise GeneracionError(
-                'El proveedor "tripo3d" requiere la variable de entorno TRIPO_API_KEY '
-                '(por ejemplo: export TRIPO_API_KEY="tsk_...").'
-            )
+            raise GeneracionError(mensaje_tripo_api_key_faltante())
 
         self.parametros_registro = {}
 

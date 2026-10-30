@@ -11,25 +11,60 @@ encontrar lo que necesitas para sacar un pedido adelante.
 
 ## 1. Instalar y comprobar
 
-Si todavía no tienes castkit instalado, instálalo como herramienta con
-[uv](https://docs.astral.sh/uv/) (una sola vez; no hace falta clonar nada):
+Antes de tu primer pedido hay que instalar tres cosas: Git, [uv](https://docs.astral.sh/uv/) y
+castkit. Son los mismos pasos la primera vez y cada vez que te toque dejar listo un equipo nuevo.
 
-```bash
-uv tool install 'castkit @ git+ssh://git@github.com/alexisbanda/castkit.git'
+**Nota:** esta forma de instalar es provisional, mientras se decide cómo se va a distribuir
+castkit más adelante ([#80](https://github.com/alexisbanda/castkit/issues/80)). Por ahora se
+instala directamente desde el repositorio de GitHub con Git, y tu cuenta de GitHub tiene que estar
+añadida como colaboradora del repositorio (lo hace quien administra castkit en el taller).
+
+**a) Abre la terminal.** En Windows, abre **PowerShell** desde el menú Inicio (escribe
+«PowerShell» y pulsa Intro); no uses el «Símbolo del sistema» (`cmd`), porque el comando de
+instalación de castkit no funciona ahí. En Linux o macOS, abre tu terminal de siempre.
+
+**b) Instala Git (si no lo tienes) y uv.**
+
+En Windows, desde PowerShell:
+
+```powershell
+winget install --id Git.Git -e
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-El pedido del toro usa el proveedor `profundidad` (media figura desde una foto o dibujo
-frontal), que necesita un paquete adicional. Si vas a trabajar con medias figuras, instala con
-ese extra desde el principio:
+(Si tu equipo no tiene `winget`, instala Git con el instalador de
+[git-scm.com](https://git-scm.com/download/win).)
+
+En Linux o macOS:
 
 ```bash
-uv tool install 'castkit[profundidad] @ git+ssh://git@github.com/alexisbanda/castkit.git'
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-Esto deja el comando `castkit` disponible directamente (sin nada delante). Para actualizarlo más
-adelante: `uv tool upgrade castkit`.
+(La mayoría de Linux y macOS ya traen Git instalado; si el comando `git` no funciona, instálalo
+con el gestor de paquetes de tu sistema, por ejemplo `apt install git`.)
 
-Después de instalar, comprueba que todo quedó en orden con:
+**c) Cierra la terminal y abre una nueva.** El instalador de uv deja todo listo, pero la terminal
+donde lo instalaste no se entera: cierra esa ventana y abre una terminal nueva (en Windows, de
+nuevo PowerShell) antes de seguir.
+
+**d) Instala castkit:**
+
+```bash
+uv tool install "castkit[profundidad] @ git+https://github.com/alexisbanda/castkit.git"
+```
+
+El pedido del toro usa el proveedor `profundidad` (media figura desde una foto o dibujo frontal);
+si tu taller no trabaja con medias figuras, puedes instalar sin `[profundidad]`. La primera vez
+puede abrirse el navegador para que inicies sesión en GitHub —es el gestor de credenciales de Git,
+que comprueba que tienes acceso al repositorio—; inicia sesión con tu cuenta y sigue. Para
+actualizar más adelante: `uv tool upgrade castkit`.
+
+**e) Cierra la terminal y abre otra nueva.** Vas a ver un aviso parecido a «...\.local\bin is not
+on your PATH»: es normal, solo dice que esta terminal todavía no conoce el comando `castkit`.
+Cierra la ventana y abre una terminal nueva; ahí el comando ya funciona.
+
+**f) Comprueba que todo quedó en orden:**
 
 ```bash
 castkit comprobar
@@ -45,6 +80,43 @@ falla»](#7-cuando-algo-falla), más abajo, están los casos más comunes. El de
 instalación y de `castkit comprobar` está en el README, secciones [«Instalación para usar
 castkit»](../README.md#instalación-para-usar-castkit) y [«Comprobar la
 instalación»](../README.md#comprobar-la-instalación-castkit-comprobar).
+
+### Definir una variable de entorno
+
+Una **variable de entorno** es un valor que tu sistema recuerda entre comandos y entre terminales,
+una vez que la defines. castkit usa estas tres:
+
+- **`CASTKIT_DISENOS`**: la carpeta donde se van a crear los diseños nuevos (si no la defines, se
+  crean en la carpeta donde estés parado al ejecutar `castkit alta`). Conviene definirla antes de
+  tu primer pedido, así todos tus diseños quedan juntos en un mismo lugar.
+- **`BLENDER_BIN`**: solo si instalaste Blender en una carpeta distinta a la que castkit revisa
+  sola (ver [«Blender no encontrado»](#blender-no-encontrado), en [«Cuando algo
+  falla»](#7-cuando-algo-falla) más abajo).
+- **`TRIPO_API_KEY`**: solo si vas a usar el proveedor `tripo3d` (generación 3D en la nube).
+
+**Windows** (en PowerShell): primero crea la carpeta, después define la variable (cambia el nombre
+de la carpeta si prefieres otro):
+
+```powershell
+mkdir "$env:USERPROFILE\Documents\Diseños"
+setx CASTKIT_DISENOS "$env:USERPROFILE\Documents\Diseños"
+```
+
+También puedes definirla sin comandos: busca «Editar las variables de entorno de tu cuenta» en el
+menú Inicio y agrega una variable nueva con ese nombre y esa ruta. De cualquiera de las dos
+formas, **abre una terminal nueva** después: ni `setx` ni ese panel afectan a la terminal que
+tienes abierta, solo a las que abras después.
+
+**Linux/macOS**: agrega esta línea a `~/.bashrc` (o el archivo de arranque de tu shell) y abre una
+terminal nueva:
+
+```bash
+export CASTKIT_DISENOS=~/Documentos/Disenos
+```
+
+El README explica cada variable con más detalle: [«Dónde se crea el
+diseño»](../README.md#dónde-se-crea-el-diseño) y [«Cómo apuntar a
+Blender»](../README.md#cómo-apuntar-a-blender).
 
 ## 2. Preparar el brief
 
@@ -242,7 +314,7 @@ El proveedor profundidad necesita el extra opcional: uv sync --extra profundidad
 con el extra:
 
 ```bash
-uv tool install 'castkit[profundidad] @ git+ssh://git@github.com/alexisbanda/castkit.git'
+uv tool install --reinstall "castkit[profundidad] @ git+https://github.com/alexisbanda/castkit.git"
 ```
 
 (El mensaje menciona `uv sync --extra profundidad`, que es la forma equivalente para quien
