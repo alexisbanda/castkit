@@ -49,9 +49,9 @@ Etapa 'instalar-uv' {
 }
 $UvBin = Join-Path $HOME '.local\bin'
 
-# 2. ¿Qué pasa si se pega el comando de la guía (comillas simples) en cmd.exe?
-Etapa 'guia-en-cmd-comillas-simples' {
-    cmd /c "`"$UvBin\uv.exe`" tool install 'castkit @ $Repo'"
+# 2. El comando de la guía (comillas dobles, git+https) pegado en cmd.exe: debe funcionar.
+Etapa 'guia-en-cmd-comillas-dobles' {
+    cmd /c "`"$UvBin\uv.exe`" tool install `"castkit @ $Repo`""
 }
 
 # 3. Instalación real, en PowerShell, con el extra profundidad (como en la guía).
