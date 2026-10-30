@@ -247,8 +247,10 @@ Informa, en español y línea a línea:
   fallar la comprobación.
 - **Configuración de fabricación**: la ruta resuelta (ver «Instalación para usar castkit») y si
   es válida.
-- **Carpeta de diseños**: la carpeta donde se crearán los diseños nuevos (`CASTKIT_DISENOS` o la
-  actual); avisa si esa carpeta cae dentro del propio clon de castkit.
+- **Carpeta de diseños**: la carpeta donde se crearán los diseños nuevos (`CASTKIT_DISENOS`, o
+  `Documentos/castkit` por defecto; ver [«Dónde se crea el
+  diseño»](#dónde-se-crea-el-diseño)), e indica cuál de las dos es; avisa si esa carpeta cae
+  dentro del propio clon de castkit.
 - **Clave de Tripo**: si `TRIPO_API_KEY` está definida, sin mostrar su valor.
 
 Termina con código `0` si Blender está disponible y la configuración es válida; si no, termina
@@ -400,8 +402,23 @@ las opciones que faltan. Si el diseño ya existe, no se modifica nada y se avisa
 
 ### Dónde se crea el diseño
 
-Por defecto, el diseño se crea en la carpeta actual. Si la variable de entorno
-`CASTKIT_DISENOS` está definida, se crea dentro de esa carpeta (debe existir de antemano):
+Por defecto (sin configurar nada, #83), el diseño se crea dentro de la carpeta de Documentos del
+usuario actual, en una subcarpeta `castkit` que se crea sola la primera vez que hace falta:
+
+- **Windows**: la carpeta de Documentos que usa el Explorador (`SHGetKnownFolderPath`, respeta
+  OneDrive y el idioma del sistema), por ejemplo `C:\Users\Ana\Documents\castkit`; si no se puede
+  resolver, `%USERPROFILE%\Documents\castkit`.
+- **macOS**: `~/Documents/castkit`.
+- **Linux**: la que indique `xdg-user-dir DOCUMENTS` si está instalado y da una carpeta distinta
+  de `$HOME` (por ejemplo `~/Documentos/castkit` con el escritorio en español); si no,
+  `~/Documents/castkit`.
+
+`castkit comprobar` siempre muestra la carpeta resuelta e indica si es la de por defecto o viene
+de `CASTKIT_DISENOS` (ver más abajo).
+
+Si la variable de entorno `CASTKIT_DISENOS` está definida, se usa esa carpeta en su lugar (debe
+existir de antemano), por ejemplo para guardar los diseños en otro disco o una carpeta
+compartida:
 
 ```bash
 export CASTKIT_DISENOS=/datos/disenos
@@ -418,7 +435,20 @@ setx CASTKIT_DISENOS "$env:USERPROFILE\Documents\Diseños"
 
 Más sobre cómo definir esta y otras variables de entorno, con el panel de Windows como
 alternativa a `setx`, en la guía del operador, sección [«Definir una variable de
-entorno»](docs/guia-operador.md#definir-una-variable-de-entorno).
+entorno»](docs/guia-operador.md#definir-una-variable-de-entorno) (allí es opcional: no hace falta
+para el primer pedido).
+
+**Compatibilidad con diseños antiguos**: los comandos que buscan un diseño existente (`flujo`,
+`generar`, `limpieza`, `mecha`, `control1`, `matriz`, `version`, `ingesta`) primero miran en la
+carpeta de diseños; si no está ahí pero sí hay un diseño válido con ese nombre en la carpeta
+actual (el comportamiento de antes del #83), lo usan y avisan por la terminal para que lo muevas:
+
+```
+Aviso: el diseño "toro" está en la carpeta actual (/home/ana), no en la carpeta de diseños
+(/home/ana/Documents/castkit). Muévelo allí para tenerlo todo junto.
+```
+
+`castkit alta` siempre crea el diseño en la carpeta de diseños, nunca en la actual.
 
 ## Crear una nueva versión de un diseño
 
