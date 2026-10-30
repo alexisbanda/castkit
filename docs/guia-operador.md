@@ -56,8 +56,8 @@ de control 1, la limpieza de respaldo, etc.) y necesita la versión fijada en el
 En **Windows**, descarga el instalador `.msi` y acepta la carpeta que propone: castkit lo
 encuentra solo ahí, sin configurar nada más.
 
-En **Linux/macOS**, descomprime Blender donde prefieras y deja el ejecutable `blender`
-accesible en el `PATH`, o define la variable de entorno `BLENDER_BIN` con la ruta completa (ver
+En **Linux/macOS**, instala Blender donde prefieras (en Linux se descomprime; en macOS se arrastra
+el `.dmg` a Aplicaciones) y deja el ejecutable `blender` accesible en el `PATH`, o define la variable de entorno `BLENDER_BIN` con la ruta completa (ver
 [«Definir una variable de entorno»](#definir-una-variable-de-entorno), más abajo).
 
 Más adelante, `castkit comprobar` (paso **g**) confirma que Blender quedó encontrado y con qué
@@ -98,7 +98,7 @@ instalación»](../README.md#comprobar-la-instalación-castkit-comprobar).
 
 ### Definir una variable de entorno
 
-Esta sección es **opcional**: no hace falta para dar tu primer pedido. Sin que definas nada, tus
+Para los diseños, esta sección es **opcional**: no hace falta para dar tu primer pedido. Sin que definas nada, tus
 diseños se guardan en `Documentos\castkit` (en el Explorador: «Documentos › castkit»; en Linux o
 macOS, `~/Documentos/castkit` o `~/Documents/castkit`, según el idioma del sistema), y `castkit
 comprobar` siempre te dice qué carpeta es.
