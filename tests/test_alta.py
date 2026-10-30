@@ -75,11 +75,10 @@ def brief_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def destino(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Carpeta actual (cwd) usada como destino cuando no hay CASTKIT_DISENOS."""
+    """Carpeta de diseños usada como destino (vía CASTKIT_DISENOS, #83)."""
     carpeta = tmp_path / "disenos"
     carpeta.mkdir()
-    monkeypatch.chdir(carpeta)
-    monkeypatch.delenv("CASTKIT_DISENOS", raising=False)
+    monkeypatch.setenv("CASTKIT_DISENOS", str(carpeta))
     return carpeta
 
 
@@ -184,13 +183,16 @@ def test_usa_castkit_disenos_cuando_esta_definida(
     assert not (otra_cwd / "guagua-pan").exists()
 
 
-def test_usa_la_carpeta_actual_cuando_no_hay_castkit_disenos(
-    destino: Path, brief_dir: Path
+def test_usa_la_carpeta_de_disenos_por_defecto_cuando_no_hay_castkit_disenos(
+    brief_dir: Path,
 ) -> None:
+    """Sin CASTKIT_DISENOS, se usa <Documentos>/castkit (detalle en test_carpeta_disenos.py)."""
+    from castkit.diseno import carpeta_disenos
+
     codigo = main(_argv(brief=str(brief_dir)))
 
     assert codigo == 0
-    assert (destino / "guagua-pan").is_dir()
+    assert (carpeta_disenos() / "guagua-pan").is_dir()
 
 
 def test_castkit_disenos_inexistente_falla_sin_crear_nada(

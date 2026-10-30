@@ -14,6 +14,8 @@ import math
 import os
 import re
 import shutil
+import subprocess
+import sys
 import tempfile
 import unicodedata
 from dataclasses import dataclass
@@ -72,15 +74,126 @@ def validar_nombre(nombre: str) -> None:
     raise AltaError(base)
 
 
+def _documentos_windows() -> Path | None:
+    """Pide a Windows la carpeta de Documentos vía ``SHGetKnownFolderPath``.
+
+    Usa el *Known Folder* ``FOLDERID_Documents``
+    (``{FDD39AD0-238F-46AF-ADB4-6C85480369C7}``), que respeta OneDrive y el
+    idioma del sistema (a diferencia de asumir ``%USERPROFILE%\\Documents``
+    a ciegas). Devuelve ``None`` ante cualquier fallo, para que quien llama
+    use una carpeta de reserva. Vive en su propia función para poder
+    sustituirla en los tests (``monkeypatch``), ya que esta API de Windows no
+    se puede ejercitar en otras plataformas; el ``import ctypes`` es local
+    para no intentar cargarlo fuera de Windows.
+    """
+    import ctypes
+
+    try:
+
+        class _GUID(ctypes.Structure):
+            _fields_ = [
+                ("Data1", ctypes.c_ulong),
+                ("Data2", ctypes.c_ushort),
+                ("Data3", ctypes.c_ushort),
+                ("Data4", ctypes.c_ubyte * 8),
+            ]
+
+        guid = _GUID()
+        if ctypes.windll.ole32.CLSIDFromString(  # type: ignore[attr-defined]
+            "{FDD39AD0-238F-46AF-ADB4-6C85480369C7}", ctypes.byref(guid)
+        ) != 0:
+            return None
+
+        buf = ctypes.c_wchar_p()
+        resultado = ctypes.windll.shell32.SHGetKnownFolderPath(  # type: ignore[attr-defined]
+            ctypes.byref(guid), 0, None, ctypes.byref(buf)
+        )
+        if resultado != 0 or not buf.value:
+            return None
+        ruta = Path(buf.value)
+        ctypes.windll.ole32.CoTaskMemFree(buf)  # type: ignore[attr-defined]
+        return ruta
+    except Exception:
+        return None
+
+
+def _documentos_linux() -> Path | None:
+    """Pregunta a ``xdg-user-dir DOCUMENTS`` por la carpeta de Documentos.
+
+    Devuelve ``None`` si ``xdg-user-dir`` no está instalado, falla, tarda
+    demasiado, o devuelve una ruta vacía o igual a ``$HOME`` (señal de que no
+    hay una carpeta de Documentos distinta configurada). Vive en su propia
+    función para poder sustituirla en los tests.
+    """
+    ejecutable = shutil.which("xdg-user-dir")
+    if not ejecutable:
+        return None
+    try:
+        resultado = subprocess.run(
+            [ejecutable, "DOCUMENTS"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except Exception:
+        return None
+    salida = resultado.stdout.strip()
+    if not salida:
+        return None
+    ruta = Path(salida)
+    if ruta.resolve() == Path.home().resolve():
+        return None
+    return ruta
+
+
+def carpeta_documentos(plataforma: str | None = None) -> Path:
+    """Devuelve la carpeta de Documentos del usuario actual.
+
+    Depende del sistema operativo (ver ``sys.platform``, o el valor forzado
+    en ``plataforma``, pensado para los tests):
+
+    - Windows (``win32``): la carpeta conocida de Documentos
+      (``SHGetKnownFolderPath(FOLDERID_Documents)``, ver
+      :func:`_documentos_windows`), que respeta OneDrive y el idioma; si
+      falla, ``%USERPROFILE%\\Documents`` (o ``~/Documents`` si tampoco hay
+      ``USERPROFILE``).
+    - macOS (``darwin``): ``~/Documents``.
+    - Linux (y el resto de *nix): la que indique ``xdg-user-dir DOCUMENTS``
+      (ver :func:`_documentos_linux`) si está disponible y es distinta de
+      ``$HOME``; si no, ``~/Documents``.
+    """
+    plataforma = plataforma if plataforma is not None else sys.platform
+    if plataforma == "win32":
+        ruta = _documentos_windows()
+        if ruta is not None:
+            return ruta
+        base = os.environ.get("USERPROFILE")
+        if base:
+            return Path(base) / "Documents"
+        return Path.home() / "Documents"
+    if plataforma == "darwin":
+        return Path.home() / "Documents"
+    ruta = _documentos_linux()
+    if ruta is not None:
+        return ruta
+    return Path.home() / "Documents"
+
+
 def carpeta_disenos() -> Path:
-    """Devuelve la carpeta donde se crean los diseños.
+    """Devuelve la carpeta donde se crean los diseños, creándola si hace falta.
 
     Usa la variable de entorno ``CASTKIT_DISENOS`` si está definida (debe
-    apuntar a una carpeta existente); si no, devuelve la carpeta actual.
+    apuntar a una carpeta existente, como hasta ahora); si no, usa
+    ``<Documentos>/castkit`` (ver :func:`carpeta_documentos`), creándola junto
+    con sus carpetas padre la primera vez que haga falta, para que el
+    operador no tenga que crear ni configurar nada (#83).
     """
     valor = os.environ.get("CASTKIT_DISENOS")
     if not valor:
-        return Path.cwd()
+        carpeta = carpeta_documentos() / "castkit"
+        carpeta.mkdir(parents=True, exist_ok=True)
+        return carpeta
 
     ruta = Path(valor)
     if not ruta.is_dir():
@@ -89,6 +202,13 @@ def carpeta_disenos() -> Path:
             "que no existe o no es una carpeta."
         )
     return ruta
+
+
+def origen_carpeta_disenos() -> str:
+    """Indica de dónde viene :func:`carpeta_disenos`: ``"variable"`` si la fija
+    ``CASTKIT_DISENOS``, o ``"defecto"`` si es ``<Documentos>/castkit``.
+    """
+    return "variable" if os.environ.get("CASTKIT_DISENOS") else "defecto"
 
 
 @dataclass

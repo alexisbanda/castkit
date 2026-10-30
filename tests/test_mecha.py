@@ -56,6 +56,7 @@ def _preparar_diseno_limpio(
     disenos_dir = tmp_path / "disenos"
     disenos_dir.mkdir(exist_ok=True)
     monkeypatch.chdir(disenos_dir)
+    monkeypatch.setenv("CASTKIT_DISENOS", str(disenos_dir))
     brief = tmp_path / "brief_src"
     brief.mkdir(exist_ok=True)
     (brief / "pieza.stl").write_bytes(CUBE_STL.read_bytes())
@@ -176,6 +177,7 @@ def test_limpieza_usa_respaldo_de_blender_cuando_python_no_cierra_la_malla(
     disenos_dir = tmp_path / "disenos"
     disenos_dir.mkdir()
     monkeypatch.chdir(disenos_dir)
+    monkeypatch.setenv("CASTKIT_DISENOS", str(disenos_dir))
     brief = tmp_path / "brief_src"
     brief.mkdir()
     (brief / "rota.stl").write_bytes(ROTA_STL.read_bytes())
@@ -222,6 +224,7 @@ def test_proveedor_tripo3d_valida_api_key(
     disenos_dir = tmp_path / "disenos"
     disenos_dir.mkdir()
     monkeypatch.chdir(disenos_dir)
+    monkeypatch.setenv("CASTKIT_DISENOS", str(disenos_dir))
     brief = tmp_path / "brief_src"
     brief.mkdir()
     (brief / "ref.png").write_bytes(b"\x89PNG\r\n\x1a\n")
@@ -243,6 +246,7 @@ def test_proveedor_fal_fue_retirado_y_lista_los_disponibles(
     disenos_dir = tmp_path / "disenos"
     disenos_dir.mkdir()
     monkeypatch.chdir(disenos_dir)
+    monkeypatch.setenv("CASTKIT_DISENOS", str(disenos_dir))
     brief = tmp_path / "brief_src"
     brief.mkdir()
     (brief / "ref.png").write_bytes(b"\x89PNG\r\n\x1a\n")
@@ -266,6 +270,7 @@ def test_flujo_completo_genera_matriz_y_ficha_tecnica_en_espanol(
     disenos_dir = tmp_path / "disenos"
     disenos_dir.mkdir()
     monkeypatch.chdir(disenos_dir)
+    monkeypatch.setenv("CASTKIT_DISENOS", str(disenos_dir))
     brief = tmp_path / "brief_src"
     brief.mkdir()
     (brief / "modelo.stl").write_bytes(CUBE_STL.read_bytes())
@@ -303,6 +308,7 @@ def test_flujo_sin_terminal_se_detiene_en_control1_sin_aprobar(
     disenos_dir = tmp_path / "disenos"
     disenos_dir.mkdir()
     monkeypatch.chdir(disenos_dir)
+    monkeypatch.setenv("CASTKIT_DISENOS", str(disenos_dir))
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
     brief = tmp_path / "brief_src"
     brief.mkdir()

@@ -22,6 +22,7 @@ import copy
 import json
 import os
 import re
+import sys
 import tempfile
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -79,9 +80,13 @@ def nombre_archivo(diseno: str, version: int, pieza: str, ext: str) -> str:
 def ubicar_diseno(nombre: str) -> Path:
     """Devuelve la carpeta del diseño ``nombre`` dentro de :func:`carpeta_disenos`.
 
-    Lanza :class:`VersionError` si el nombre no es válido, o si la carpeta no
-    existe o no contiene un ``diseno.json`` (es decir, no es un diseño dado de
-    alta con ``castkit alta``).
+    Si no está ahí pero sí hay un diseño válido con ese nombre en la carpeta
+    actual (compatibilidad con el comportamiento anterior al #83, antes de
+    que hubiera una carpeta de diseños por defecto), se usa ese y se avisa
+    por stderr para que el operador lo mueva a la carpeta de diseños.
+
+    Lanza :class:`VersionError` si el nombre no es válido, o si no se
+    encuentra un diseño válido (con ``diseno.json``) en ninguna de las dos.
     """
     try:
         validar_nombre(nombre)
@@ -90,9 +95,24 @@ def ubicar_diseno(nombre: str) -> Path:
 
     destino = carpeta_disenos()
     carpeta = destino / nombre
-    if not carpeta.is_dir() or not (carpeta / "diseno.json").is_file():
-        raise VersionError(f'No se encontró el diseño "{nombre}" en {destino}.')
-    return carpeta
+    if carpeta.is_dir() and (carpeta / "diseno.json").is_file():
+        return carpeta
+
+    actual = Path.cwd()
+    carpeta_actual = actual / nombre
+    if (
+        actual.resolve() != destino.resolve()
+        and carpeta_actual.is_dir()
+        and (carpeta_actual / "diseno.json").is_file()
+    ):
+        print(
+            f'Aviso: el diseño "{nombre}" está en la carpeta actual ({actual}), no en la '
+            f"carpeta de diseños ({destino}). Muévelo allí para tenerlo todo junto.",
+            file=sys.stderr,
+        )
+        return carpeta_actual
+
+    raise VersionError(f'No se encontró el diseño "{nombre}" en {destino}.')
 
 
 def cargar_diseno(carpeta: Path) -> dict[str, Any]:
