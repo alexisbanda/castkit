@@ -63,10 +63,10 @@ def _simular_respuestas(monkeypatch: pytest.MonkeyPatch, respuestas: list[str]) 
 
 @pytest.fixture
 def destino(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Carpeta de diseños usada como destino (vía CASTKIT_DISENOS, #83)."""
     carpeta = tmp_path / "disenos"
     carpeta.mkdir()
-    monkeypatch.chdir(carpeta)
-    monkeypatch.delenv("CASTKIT_DISENOS", raising=False)
+    monkeypatch.setenv("CASTKIT_DISENOS", str(carpeta))
     return carpeta
 
 

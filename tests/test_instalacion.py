@@ -368,8 +368,7 @@ def test_resumen_de_alta_muestra_la_carpeta_del_diseno(
 ) -> None:
     destino = tmp_path / "disenos"
     destino.mkdir()
-    monkeypatch.chdir(destino)
-    monkeypatch.delenv("CASTKIT_DISENOS", raising=False)
+    monkeypatch.setenv("CASTKIT_DISENOS", str(destino))
 
     brief = tmp_path / "brief-toro"
     brief.mkdir()

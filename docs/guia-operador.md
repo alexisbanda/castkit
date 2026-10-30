@@ -11,8 +11,9 @@ encontrar lo que necesitas para sacar un pedido adelante.
 
 ## 1. Instalar y comprobar
 
-Antes de tu primer pedido hay que instalar tres cosas: Git, [uv](https://docs.astral.sh/uv/) y
-castkit. Son los mismos pasos la primera vez y cada vez que te toque dejar listo un equipo nuevo.
+Antes de tu primer pedido hay que instalar cuatro cosas: Git, [uv](https://docs.astral.sh/uv/),
+Blender y castkit. Son los mismos pasos la primera vez y cada vez que te toque dejar listo un
+equipo nuevo.
 
 **Nota:** esta forma de instalar es provisional, mientras se decide cómo se va a distribuir
 castkit más adelante ([#80](https://github.com/alexisbanda/castkit/issues/80)). Por ahora se
@@ -48,7 +49,21 @@ con el gestor de paquetes de tu sistema, por ejemplo `apt install git`.)
 donde lo instalaste no se entera: cierra esa ventana y abre una terminal nueva (en Windows, de
 nuevo PowerShell) antes de seguir.
 
-**d) Instala castkit:**
+**d) Instala Blender.** castkit usa Blender por debajo para varios pasos del pipeline (el punto
+de control 1, la limpieza de respaldo, etc.) y necesita la versión fijada en el proyecto,
+**5.2.2 LTS**: descárgala desde [blender.org/download](https://www.blender.org/download/).
+
+En **Windows**, descarga el instalador `.msi` y acepta la carpeta que propone: castkit lo
+encuentra solo ahí, sin configurar nada más.
+
+En **Linux/macOS**, instala Blender donde prefieras (en Linux se descomprime; en macOS se arrastra
+el `.dmg` a Aplicaciones) y deja el ejecutable `blender` accesible en el `PATH`, o define la variable de entorno `BLENDER_BIN` con la ruta completa (ver
+[«Definir una variable de entorno»](#definir-una-variable-de-entorno), más abajo).
+
+Más adelante, `castkit comprobar` (paso **g**) confirma que Blender quedó encontrado y con qué
+versión.
+
+**e) Instala castkit:**
 
 ```bash
 uv tool install "castkit[profundidad] @ git+https://github.com/alexisbanda/castkit.git"
@@ -60,11 +75,11 @@ puede abrirse el navegador para que inicies sesión en GitHub —es el gestor de
 que comprueba que tienes acceso al repositorio—; inicia sesión con tu cuenta y sigue. Para
 actualizar más adelante: `uv tool upgrade castkit`.
 
-**e) Cierra la terminal y abre otra nueva.** Si ves un aviso parecido a «...\.local\bin is not
+**f) Cierra la terminal y abre otra nueva.** Si ves un aviso parecido a «...\.local\bin is not
 on your PATH»: es normal, solo dice que esta terminal todavía no conoce el comando `castkit`.
 Cierra la ventana y abre una terminal nueva; ahí el comando ya funciona.
 
-**f) Comprueba que todo quedó en orden:**
+**g) Comprueba que todo quedó en orden:**
 
 ```bash
 castkit comprobar
@@ -83,12 +98,16 @@ instalación»](../README.md#comprobar-la-instalación-castkit-comprobar).
 
 ### Definir una variable de entorno
 
+Para los diseños, esta sección es **opcional**: no hace falta para dar tu primer pedido. Sin que definas nada, tus
+diseños se guardan en `Documentos\castkit` (en el Explorador: «Documentos › castkit»; en Linux o
+macOS, `~/Documentos/castkit` o `~/Documents/castkit`, según el idioma del sistema), y `castkit
+comprobar` siempre te dice qué carpeta es.
+
 Una **variable de entorno** es un valor que tu sistema recuerda entre comandos y entre terminales,
 una vez que la defines. castkit usa estas tres:
 
-- **`CASTKIT_DISENOS`**: la carpeta donde se van a crear los diseños nuevos (si no la defines, se
-  crean en la carpeta donde estés parado al ejecutar `castkit alta`). Conviene definirla antes de
-  tu primer pedido, así todos tus diseños quedan juntos en un mismo lugar.
+- **`CASTKIT_DISENOS`**: si quieres guardar los diseños en otra carpeta (por ejemplo, una
+  compartida en red o sincronizada con otro servicio), defínela con la ruta que prefieras.
 - **`BLENDER_BIN`**: solo si instalaste Blender en una carpeta distinta a la que castkit revisa
   sola (ver [«Blender no encontrado»](#blender-no-encontrado), en [«Cuando algo
   falla»](#7-cuando-algo-falla) más abajo).

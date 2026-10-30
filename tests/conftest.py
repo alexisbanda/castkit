@@ -27,6 +27,24 @@ def _config_fabricacion_de_prueba(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CASTKIT_FABRICACION_TOML", str(_RAIZ / "config" / "fabricacion.toml"))
 
 
+@pytest.fixture(autouse=True)
+def _carpeta_disenos_aislada(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Evita que la suite toque la carpeta Documentos real del equipo (#83).
+
+    Quita ``CASTKIT_DISENOS`` del entorno heredado (un test que la necesite
+    la vuelve a fijar en su propio cuerpo, con `monkeypatch.setenv`) y hace
+    que :func:`castkit.diseno.carpeta_documentos` devuelva una carpeta
+    dentro de `tmp_path`, para que `carpeta_disenos()` sin la variable
+    definida nunca cree ni escriba en los Documentos reales del equipo que
+    corre los tests.
+    """
+    import castkit.diseno as mod_diseno
+
+    monkeypatch.delenv("CASTKIT_DISENOS", raising=False)
+    documentos = tmp_path / "Documents"
+    monkeypatch.setattr(mod_diseno, "carpeta_documentos", lambda plataforma=None: documentos)
+
+
 def pytest_runtest_setup(item: pytest.Item) -> None:
     if "blender" in item.keywords:
         try:

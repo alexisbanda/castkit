@@ -32,7 +32,7 @@ from castkit.config import (
     ruta_config_fabricacion,
     version_blender_fijada,
 )
-from castkit.diseno import carpeta_disenos
+from castkit.diseno import carpeta_disenos, origen_carpeta_disenos
 
 _TIMEOUT_VERSION_BLENDER_S = 10.0
 
@@ -120,7 +120,12 @@ def _comprobar_carpeta_disenos() -> None:
         print(f"Carpeta de diseños: error al resolverla: {exc}")
         return
 
-    print(f"Carpeta de diseños: {carpeta}")
+    if origen_carpeta_disenos() == "variable":
+        print(f"Carpeta de diseños: {carpeta} (variable CASTKIT_DISENOS)")
+    else:
+        print(
+            f"Carpeta de diseños: {carpeta} (por defecto; para usar otra, define CASTKIT_DISENOS)"
+        )
     raiz_clon = carpeta_bajo_clon_castkit(carpeta)
     if raiz_clon is not None:
         print(
