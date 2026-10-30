@@ -20,8 +20,8 @@ instala directamente desde el repositorio de GitHub con Git, y tu cuenta de GitH
 añadida como colaboradora del repositorio (lo hace quien administra castkit en el taller).
 
 **a) Abre la terminal.** En Windows, abre **PowerShell** desde el menú Inicio (escribe
-«PowerShell» y pulsa Intro); no uses el «Símbolo del sistema» (`cmd`), porque el comando de
-instalación de castkit no funciona ahí. En Linux o macOS, abre tu terminal de siempre.
+«PowerShell» y pulsa Intro); no uses el «Símbolo del sistema» (`cmd`): los comandos de esta
+guía están pensados para PowerShell. En Linux o macOS, abre tu terminal de siempre.
 
 **b) Instala Git (si no lo tienes) y uv.**
 
@@ -32,8 +32,8 @@ winget install --id Git.Git -e
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-(Si tu equipo no tiene `winget`, instala Git con el instalador de
-[git-scm.com](https://git-scm.com/download/win).)
+Si `winget` pregunta si aceptas los términos, escribe `Y` y pulsa Intro. Si tu equipo no tiene
+`winget`, instala Git con el instalador de [git-scm.com](https://git-scm.com/download/win).
 
 En Linux o macOS:
 
@@ -60,7 +60,7 @@ puede abrirse el navegador para que inicies sesión en GitHub —es el gestor de
 que comprueba que tienes acceso al repositorio—; inicia sesión con tu cuenta y sigue. Para
 actualizar más adelante: `uv tool upgrade castkit`.
 
-**e) Cierra la terminal y abre otra nueva.** Vas a ver un aviso parecido a «...\.local\bin is not
+**e) Cierra la terminal y abre otra nueva.** Si ves un aviso parecido a «...\.local\bin is not
 on your PATH»: es normal, solo dice que esta terminal todavía no conoce el comando `castkit`.
 Cierra la ventana y abre una terminal nueva; ahí el comando ya funciona.
 
@@ -107,10 +107,11 @@ menú Inicio y agrega una variable nueva con ese nombre y esa ruta. De cualquier
 formas, **abre una terminal nueva** después: ni `setx` ni ese panel afectan a la terminal que
 tienes abierta, solo a las que abras después.
 
-**Linux/macOS**: agrega esta línea a `~/.bashrc` (o el archivo de arranque de tu shell) y abre una
-terminal nueva:
+**Linux/macOS**: crea la carpeta y agrega la línea `export` a `~/.bashrc` (o el archivo de arranque de
+tu shell); después abre una terminal nueva:
 
 ```bash
+mkdir -p ~/Documentos/Disenos
 export CASTKIT_DISENOS=~/Documentos/Disenos
 ```
 

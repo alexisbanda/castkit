@@ -131,7 +131,7 @@ uv tool install "castkit @ git+https://github.com/alexisbanda/castkit.git"
 
 La primera vez, Git puede abrir el navegador para que inicies sesión en GitHub (es el gestor de
 credenciales de Git, que comprueba el acceso al repositorio); inicia sesión con tu cuenta y sigue.
-Paso a paso, con capturas y qué hacer en Windows, en la [guía del operador, sección «Instalar y
+Paso a paso, con qué hacer en Windows, en la [guía del operador, sección «Instalar y
 comprobar»](docs/guia-operador.md#1-instalar-y-comprobar).
 
 Si ya tienes una clave SSH propia en GitHub, puedes usar esa forma en su lugar:
