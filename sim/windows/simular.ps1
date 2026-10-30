@@ -29,7 +29,11 @@ function Etapa([string]$nombre, [scriptblock]$bloque) {
 
 # Credencial vía git (no en la URL) para que no aparezca en los logs subidos.
 git config --global url."https://x-access-token:$($env:GH_TOKEN)@github.com/".insteadOf "https://github.com/"
-$Repo = "git+https://github.com/$($env:GITHUB_REPOSITORY).git@main"
+# Rama o commit de castkit a instalar: sim/windows/ref.txt (por defecto main).
+$RefArchivo = Join-Path $PSScriptRoot 'ref.txt'
+$Ref = if (Test-Path $RefArchivo) { (Get-Content $RefArchivo -Raw).Trim() } else { 'main' }
+"Instalando castkit desde: $Ref" | Set-Content -Encoding utf8 (Join-Path $Out "00-ref.log")
+$Repo = "git+https://github.com/$($env:GITHUB_REPOSITORY).git@$Ref"
 
 Etapa 'entorno' {
     [Environment]::OSVersion.VersionString
