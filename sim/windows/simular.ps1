@@ -95,6 +95,29 @@ $BriefConComillas = "`"$Brief`""
 $Comun = @('--modo', 'cubeta', '--material', 'silicona', '--cantidad', '10',
     '--fecha', '2026-12-15', '--licencia', 'propio', '--origen', 'dibujo del cliente')
 
+# 5b. Sin CASTKIT_DISENOS (#83): los diseños van a Documentos\castkit, se lance desde donde se lance.
+$DisenosGuardada = $env:CASTKIT_DISENOS
+Remove-Item Env:CASTKIT_DISENOS -ErrorAction SilentlyContinue
+$DocsDefecto = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'castkit'
+Push-Location $HOME
+Etapa 'defecto-alta-desde-HOME' {
+    castkit alta logo-defecto --brief $BriefConComillas --tipo-molde abierto --largo-mm 60 --grosor-mm 5 --cavidades 1 --proveedor relieve @Comun
+}
+Push-Location $env:TEMP
+Etapa 'defecto-flujo-desde-TEMP' { castkit flujo logo-defecto --aprobar-control1 }
+Pop-Location
+Etapa 'defecto-comprobar' {
+    "Documentos según Windows: $([Environment]::GetFolderPath('MyDocuments'))"
+    castkit comprobar
+}
+Etapa 'defecto-diseno-en-Documentos-castkit' {
+    $d = Join-Path $DocsDefecto 'logo-defecto'
+    if (-not (Test-Path (Join-Path $d 'diseno.json'))) { throw "No está en $d" }
+    Get-ChildItem -Recurse $d | Select-Object FullName, Length | Format-Table -AutoSize | Out-String -Width 300
+}
+Pop-Location
+$env:CASTKIT_DISENOS = $DisenosGuardada
+
 # 6. Diseño plano (relieve).
 Etapa 'alta-plano-relieve' {
     castkit alta logo-pena --brief $BriefConComillas --tipo-molde abierto --largo-mm 60 --grosor-mm 5 --cavidades 2 --proveedor relieve @Comun
