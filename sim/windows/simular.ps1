@@ -85,7 +85,7 @@ Etapa 'comprobar-con-BLENDER_BIN' {
 # usar «Copiar como ruta» en el Explorador.
 $Brief = Join-Path $HOME 'Documents\Pedidos clientes\Brief señora Peña'
 New-Item -ItemType Directory -Force -Path $Brief | Out-Null
-Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'ejemplos\brief-benchy\benchy_referencia.png') $Brief
+Copy-Item (Join-Path $PSScriptRoot 'benchy_referencia.png') $Brief -ErrorAction Stop
 $BriefConComillas = "`"$Brief`""
 
 $Comun = @('--modo', 'cubeta', '--material', 'silicona', '--cantidad', '10',
