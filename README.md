@@ -1053,3 +1053,7 @@ guardado se comporta igual que antes de este ticket.
 ## Integración continua
 
 GitHub Actions ejecuta en cada pull request y en cada push a `main`, en Linux, macOS y Windows: `uv sync --locked`, `uv run ruff check`, `uv run ruff format --check` y `uv run pytest`. Solo el job de Linux instala la versión de Blender fijada en `.blender-version` y corre los tests marcados `blender`; en macOS y Windows esos tests se saltan.
+
+## Licencia
+
+castkit se distribuye con licencia [MIT](LICENSE).

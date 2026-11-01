@@ -3,6 +3,8 @@ name = "castkit"
 version = "0.1.0"
 description = "Castkit — Agent-assisted pipeline that turns 3D models into production-ready mold masters and multi-cavity mold boxes for artisan casting."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = "==3.12.*"
 dependencies = [
     "trimesh>=4.5.3",
