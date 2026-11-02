@@ -11,38 +11,41 @@ encontrar lo que necesitas para sacar un pedido adelante.
 
 ## 1. Instalar y comprobar
 
-Antes de tu primer pedido hay que instalar dos cosas: Blender y castkit. No necesitas Git ni una
-cuenta de GitHub. Son los mismos pasos la primera vez y cada vez que te toque dejar listo un equipo
-nuevo.
+Antes de tu primer pedido hay que instalar castkit (en Windows, una sola línea también instala
+Blender si hace falta). No necesitas Git ni una cuenta de GitHub. Son los mismos pasos la primera
+vez y cada vez que te toque dejar listo un equipo nuevo.
 
 ### En Windows
 
-**a) Instala Blender.** castkit usa Blender por debajo para varios pasos del pipeline (el punto
-de control 1, la limpieza de respaldo, etc.) y necesita la versión fijada en el proyecto,
-**5.2.2 LTS**: descárgala desde [blender.org/download](https://www.blender.org/download/). Elige
-el instalador `.msi` y acepta la carpeta que propone: castkit lo encuentra solo ahí, sin configurar
-nada más.
-
-**b) Abre PowerShell** desde el menú Inicio (escribe «PowerShell» y pulsa Intro). No hace falta
+**Abre PowerShell** desde el menú Inicio (escribe «PowerShell» y pulsa Intro). No hace falta
 abrirlo como administrador. No uses el «Símbolo del sistema» (`cmd`): los comandos de esta guía
 están pensados para PowerShell.
 
-**c) Pega esta línea y pulsa Intro:**
+**Pega esta línea y pulsa Intro:**
 
 ```powershell
 irm https://github.com/alexisbanda/castkit/releases/latest/download/install.ps1 | iex
 ```
 
-Instala todo lo que falte, incluido el proveedor `profundidad` que usa el pedido del toro (media
-figura desde una foto o dibujo frontal), y al terminar ejecuta `castkit comprobar` por ti. Puede
-tardar varios minutos. Si PowerShell avisa de que los scripts están deshabilitados, pega esto en
-su lugar:
+Instala castkit, con todo lo que falte (incluido el proveedor `profundidad`, que usa el pedido del
+toro: media figura desde una foto o dibujo frontal). Si tu equipo no tiene Blender en la versión
+que usa castkit, esta misma línea lo descarga (unos 365 MB desde blender.org; según tu conexión,
+puede tardar varios minutos) y lo instala. En algún momento va a aparecer una ventana propia de
+Windows pidiendo permiso de administrador para instalar Blender: dile que sí para que la
+instalación siga. Al terminar, ejecuta `castkit comprobar` por ti: lee lo que dice al final para
+saber si quedó todo listo.
+
+Si PowerShell avisa de que los scripts están deshabilitados, pega esto en su lugar:
 
 ```powershell
 powershell -ExecutionPolicy ByPass -c "irm https://github.com/alexisbanda/castkit/releases/latest/download/install.ps1 | iex"
 ```
 
 Para actualizar más adelante, vuelve a pegar la misma línea.
+
+Si algo falla instalando Blender (la descarga, la verificación del archivo o la instalación), la
+línea lo avisa y sigue adelante: castkit queda instalado igual. Revisa [«Blender no
+encontrado»](#blender-no-encontrado), en [«Cuando algo falla»](#7-cuando-algo-falla) más abajo.
 
 ### En Linux o macOS
 
@@ -297,10 +300,13 @@ No se puede generar el punto de control 1 sin Blender: No se encuentra Blender 5
 **Qué hacer**: instala Blender en la versión fijada (puedes verla ejecutando `castkit comprobar`,
 que también la compara con la que tengas instalada).
 
-- **Windows**: si lo instalaste con el instalador de blender.org (el `.msi`), castkit lo
-  encuentra solo, sin que tengas que hacer nada más. Si lo instalaste en otra carpeta, define
-  `BLENDER_BIN` en PowerShell: `setx BLENDER_BIN "C:\ruta\a\blender.exe"` y abre una terminal
-  nueva.
+- **Windows**: lo normal es que la línea de instalación ([«Instalar y
+  comprobar»](#1-instalar-y-comprobar), arriba) ya lo haya instalado sola. Si falló (la descarga,
+  la verificación del archivo o la instalación, o le dijiste «No» a la ventana de permiso),
+  descarga a mano el instalador `.msi` desde [blender.org/download](https://www.blender.org/download/)
+  y acepta la carpeta que propone: castkit lo encuentra solo ahí, sin configurar nada más. Si lo
+  instalaste en otra carpeta, define `BLENDER_BIN` en PowerShell: `setx BLENDER_BIN
+  "C:\ruta\a\blender.exe"` y abre una terminal nueva.
 - **Linux/macOS**: define la variable de entorno `BLENDER_BIN` con la ruta completa al
   ejecutable, por ejemplo añadiendo `export BLENDER_BIN=/ruta/a/blender` a `~/.bashrc` y abriendo
   una terminal nueva.

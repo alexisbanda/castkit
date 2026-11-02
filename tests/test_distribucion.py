@@ -112,7 +112,7 @@ def test_install_ps1_exit_aparece_solo_en_el_helper_de_fallo() -> None:
 
 
 def test_install_ps1_tiene_parametro_rueda_opcional() -> None:
-    assert re.search(r"param\(\s*\[string\]\$Rueda\s*\)", _INSTALL_PS1)
+    assert re.search(r"param\(\s*\[string\]\$Rueda", _INSTALL_PS1)
 
 
 def test_install_ps1_fija_tls12_antes_de_descargar() -> None:
@@ -122,6 +122,47 @@ def test_install_ps1_fija_tls12_antes_de_descargar() -> None:
 
 def test_install_ps1_comprueba_que_castkit_exista_antes_de_ejecutarlo() -> None:
     assert "Get-Command castkit" in _INSTALL_PS1
+
+
+# ---------------------------------------------------------------------------
+# install.ps1: instalación de Blender (#85).
+# ---------------------------------------------------------------------------
+
+
+def test_install_ps1_tiene_parametro_sin_blender() -> None:
+    assert re.search(r"\[switch\]\$SinBlender", _INSTALL_PS1)
+
+
+def test_install_ps1_usa_estado_blender() -> None:
+    assert "castkit comprobar --estado-blender" in _INSTALL_PS1
+
+
+def test_install_ps1_no_contiene_la_version_fijada_de_blender() -> None:
+    raiz = Path(__file__).resolve().parents[1]
+    version_fijada = (raiz / ".blender-version").read_text(encoding="utf-8").strip()
+    assert version_fijada not in _INSTALL_PS1
+
+
+def test_install_ps1_verifica_el_sha256_del_instalador_de_blender() -> None:
+    assert "sha256" in _INSTALL_PS1.lower()
+    assert "Get-FileHash" in _INSTALL_PS1
+    assert "Sha256BlenderDePrueba" in _INSTALL_PS1
+
+
+def test_install_ps1_instala_blender_en_modo_pasivo() -> None:
+    assert "/passive" in _INSTALL_PS1
+
+
+def test_install_ps1_bloque_de_blender_no_llama_a_fail() -> None:
+    inicio = _INSTALL_PS1.index("function Instalar-Blender-Si-Falta")
+    fin = _INSTALL_PS1.index("Instalar-Blender-Si-Falta\n\n", inicio) + len(
+        "Instalar-Blender-Si-Falta\n"
+    )
+    bloque = _INSTALL_PS1[inicio:fin]
+    assert not re.search(r"\bFail\b", bloque), (
+        "El bloque de instalación de Blender no debe usar `Fail`: un fallo ahí debe avisar y "
+        "seguir hasta `castkit comprobar`, no cortar el script."
+    )
 
 
 # ---------------------------------------------------------------------------

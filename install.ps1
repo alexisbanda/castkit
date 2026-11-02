@@ -1,8 +1,12 @@
 # Instala castkit en Windows sin necesitar Git ni una cuenta de GitHub (#80).
+# Tambien instala Blender si falta (#85).
 # Uso normal (PowerShell 5.1, la que trae un Windows limpio):
 #   irm https://github.com/alexisbanda/castkit/releases/latest/download/install.ps1 | iex
-# Para pruebas, -Rueda acepta una ruta local o una URL a una rueda (.whl) de castkit.
-param([string]$Rueda)
+# Para saltar la instalacion de Blender:
+#   & ([scriptblock]::Create((irm https://github.com/alexisbanda/castkit/releases/latest/download/install.ps1))) -SinBlender
+# Para pruebas, -Rueda acepta una ruta local o una URL a una rueda (.whl) de castkit, y
+# -Sha256BlenderDePrueba sustituye la huella sha256 esperada del instalador de Blender.
+param([string]$Rueda, [switch]$SinBlender, [string]$Sha256BlenderDePrueba)
 
 $ErrorActionPreference = 'Continue'
 
@@ -43,6 +47,10 @@ function Fail {
     } else {
         throw (Tr 'La instalaci{o}n de castkit no termin{o}.')
     }
+}
+
+if (-not $SinBlender) {
+    Write-Host (Tr 'Si falta Blender en la versi{o}n que usa castkit, este instalador tambi{e}n lo descargar{a} (unos 365 MB) y lo instalar{a}. Windows va a pedir permiso de administrador en una ventana aparte: qu{e}date pendiente de esa ventana y acepta para que la instalaci{o}n siga.') -ForegroundColor Yellow
 }
 
 # 1. uv: lo instala si falta, y deja su carpeta en el PATH de esta sesion (sin pedir otra ventana).
@@ -158,7 +166,6 @@ if ($LASTEXITCODE -eq 0 -and $CastkitBinDir) {
     $env:Path = "$CastkitBinDir;$env:Path"
 }
 
-# 5. Comprobar que castkit se puede ejecutar, y correr `castkit comprobar`.
 if (-not (Get-Command castkit -ErrorAction SilentlyContinue)) {
     Fail (Tr 'castkit se instal{o} pero no se puede ejecutar en esta ventana. Revisa los mensajes anteriores y vuelve a pegar la l{i}nea de instalaci{o}n.')
 }
@@ -167,6 +174,151 @@ if ($LASTEXITCODE -ne 0) {
     Fail (Tr 'castkit se instal{o} pero no se puede ejecutar en esta ventana. Revisa los mensajes anteriores y vuelve a pegar la l{i}nea de instalaci{o}n.')
 }
 
+# 5. Blender: si falta o es otra version, se descarga e instala (salvo -SinBlender).
+# Cualquier fallo aqui (no se pudo consultar el estado, descargar, verificar o instalar)
+# se avisa en palabras llanas y el script sigue hasta `castkit comprobar`: nunca usa
+# `Fail` ni deja que una excepcion corte la instalacion de castkit, que ya quedo lista.
+function Obtener-MayorMenor([string]$Version) {
+    if ($Version -match '^(\d+\.\d+)') {
+        return $Matches[1]
+    }
+    return $null
+}
+
+function Instalar-Blender-Si-Falta {
+    if ($SinBlender) {
+        Write-Host (Tr 'Se omite la instalaci{o}n de Blender (-SinBlender).')
+        return
+    }
+
+    try {
+        $salidaEstado = & castkit comprobar --estado-blender 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $salidaEstado) {
+            Write-Host (Tr 'Aviso: no se pudo comprobar el estado de Blender; se omite este paso. Si falta, instalalo a mano desde blender.org.') -ForegroundColor Yellow
+            return
+        }
+
+        $estado = $null
+        $version = $null
+        foreach ($linea in $salidaEstado) {
+            if ($linea -match '^estado=(.+)$') { $estado = $Matches[1].Trim() }
+            if ($linea -match '^version=(.+)$') { $version = $Matches[1].Trim() }
+        }
+
+        if (-not $estado -or -not $version) {
+            Write-Host (Tr 'Aviso: no se entendi{o} la respuesta de castkit sobre Blender; se omite este paso. Si falta, instalalo a mano desde blender.org.') -ForegroundColor Yellow
+            return
+        }
+
+        if ($estado -eq 'ok') {
+            Write-Host (Tr "Blender $version ya est{a} instalado; no se descarga de nuevo.") -ForegroundColor Green
+            return
+        }
+
+        if ($estado -eq 'otra') {
+            Write-Host (Tr "Hay otra versi{o}n de Blender instalada; Blender $version se instalar{a} junto a la que ya tienes.") -ForegroundColor Yellow
+        } else {
+            Write-Host (Tr "No se encontr{o} Blender; se instalar{a} la versi{o}n $version.")
+        }
+
+        $mayorMenor = Obtener-MayorMenor $version
+        if (-not $mayorMenor) {
+            Write-Host (Tr "Aviso: no se entendi{o} el n{u}mero de versi{o}n de Blender (`"$version`"); se omite este paso. Instalalo a mano desde blender.org.") -ForegroundColor Yellow
+            return
+        }
+
+        $carpetaRelease = "Blender$mayorMenor"
+        $nombreMsi = "blender-$version-windows-x64.msi"
+        $urlMsi = "https://download.blender.org/release/$carpetaRelease/$nombreMsi"
+        $urlSha256 = "https://download.blender.org/release/$carpetaRelease/blender-$version.sha256"
+        $msi = Join-Path $env:TEMP "castkit-blender-$version.msi"
+
+        function Obtener-Sha256-Esperado {
+            if ($Sha256BlenderDePrueba) {
+                return $Sha256BlenderDePrueba.Trim().ToUpper()
+            }
+            $contenidoSha = (Invoke-WebRequest -Uri $urlSha256 -UseBasicParsing -ErrorAction Stop).Content
+            foreach ($lineaSha in ($contenidoSha -split "`n")) {
+                if ($lineaSha -match [regex]::Escape($nombreMsi)) {
+                    return ($lineaSha.Trim() -split '\s+')[0].ToUpper()
+                }
+            }
+            return $null
+        }
+
+        $shaEsperado = $null
+        try {
+            $shaEsperado = Obtener-Sha256-Esperado
+        } catch {
+            $shaEsperado = $null
+        }
+        if (-not $shaEsperado) {
+            Write-Host (Tr 'No se pudo obtener la huella (sha256) oficial de Blender; no se instala. Puedes instalarlo a mano desde blender.org. castkit ya qued{o} instalado.') -ForegroundColor Yellow
+            return
+        }
+
+        $yaValido = $false
+        if (Test-Path -LiteralPath $msi) {
+            $shaActual = (Get-FileHash -Algorithm SHA256 -LiteralPath $msi).Hash.ToUpper()
+            if ($shaActual -eq $shaEsperado) {
+                $yaValido = $true
+                Write-Host (Tr 'Ya hab{i}a un instalador de Blender descargado y v{a}lido; no se vuelve a descargar.')
+            } else {
+                Remove-Item -LiteralPath $msi -Force -ErrorAction SilentlyContinue
+            }
+        }
+
+        if (-not $yaValido) {
+            Write-Host (Tr 'Descargando Blender (unos 365 MB; puede tardar varios minutos seg{u}n tu conexi{o}n)...')
+            $descargaOk = $false
+            if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
+                & curl.exe -L --fail --retry 2 --progress-bar -o $msi $urlMsi
+                $descargaOk = ($LASTEXITCODE -eq 0)
+            } else {
+                $anteriorProgreso = $ProgressPreference
+                $ProgressPreference = 'SilentlyContinue'
+                try {
+                    Invoke-WebRequest -Uri $urlMsi -OutFile $msi -ErrorAction Stop
+                    $descargaOk = $true
+                } catch {
+                    $descargaOk = $false
+                } finally {
+                    $ProgressPreference = $anteriorProgreso
+                }
+            }
+
+            if (-not $descargaOk -or -not (Test-Path -LiteralPath $msi)) {
+                Write-Host (Tr 'No se pudo descargar Blender. Puedes instalarlo a mano desde blender.org. castkit ya qued{o} instalado.') -ForegroundColor Yellow
+                return
+            }
+
+            $shaActual = (Get-FileHash -Algorithm SHA256 -LiteralPath $msi).Hash.ToUpper()
+            if ($shaActual -ne $shaEsperado) {
+                Remove-Item -LiteralPath $msi -Force -ErrorAction SilentlyContinue
+                Write-Host (Tr 'El archivo descargado de Blender no coincide con lo esperado (sha256); no se instala. Puedes instalarlo a mano desde blender.org. castkit ya qued{o} instalado.') -ForegroundColor Yellow
+                return
+            }
+        }
+
+        Write-Host (Tr 'Instalando Blender. Windows va a pedir permiso de administrador en una ventana aparte: acepta para que la instalaci{o}n siga.') -ForegroundColor Yellow
+        $p = Start-Process msiexec -ArgumentList "/i `"$msi`" /passive /norestart" -Wait -PassThru
+
+        if ($p.ExitCode -eq 0 -or $p.ExitCode -eq 3010) {
+            Remove-Item -LiteralPath $msi -Force -ErrorAction SilentlyContinue
+            Write-Host (Tr 'Blender qued{o} instalado.') -ForegroundColor Green
+        } elseif ($p.ExitCode -eq 1602 -or $p.ExitCode -eq 1223) {
+            Write-Host (Tr 'No se dio el permiso para instalar Blender. Puedes instalarlo a mano desde blender.org, o volver a pegar esta l{i}nea para reintentarlo (el instalador descargado no se vuelve a bajar). castkit ya qued{o} instalado.') -ForegroundColor Yellow
+        } else {
+            Write-Host (Tr "La instalaci{o}n de Blender termin{o} con un problema (c{o}digo $($p.ExitCode)). Puedes instalarlo a mano desde blender.org. castkit ya qued{o} instalado.") -ForegroundColor Yellow
+        }
+    } catch {
+        Write-Host (Tr "No se pudo completar la instalaci{o}n de Blender ($($_.Exception.Message)). Puedes instalarlo a mano desde blender.org. castkit ya qued{o} instalado.") -ForegroundColor Yellow
+    }
+}
+
+Instalar-Blender-Si-Falta
+
+# 6. Comprobar que castkit se puede ejecutar, y correr `castkit comprobar`.
 Write-Host ''
 Write-Host (Tr 'castkit qued{o} instalado. Comprobando que todo est{e} en orden...') -ForegroundColor Green
 & castkit comprobar

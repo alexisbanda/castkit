@@ -52,6 +52,7 @@ Las reglas por material, la selección del proveedor de generación 3D y los par
 - CI en GitHub Actions con matriz de los tres sistemas operativos (Blender solo en Linux).
 - No hay despliegue a servidores: la herramienta se instala en los equipos del estudio.
 - Distribución: al empujar una etiqueta `v*`, `release.yml` publica una release de GitHub con la rueda (`.whl`) e `install.ps1`. El repositorio es público, así que instalar no requiere Git ni cuenta de GitHub: en Windows, una línea de PowerShell; en Linux y macOS, `uv tool install` desde la rueda (ver README).
+- En Windows, esa misma línea también instala Blender si falta (descarga el `.msi` oficial de blender.org, verifica su sha256 y lo instala con `msiexec /passive`, pidiendo permiso de administrador), usando `castkit comprobar --estado-blender` para decidir si hace falta; `-SinBlender` lo salta.
 
 ## Decisiones pendientes
 

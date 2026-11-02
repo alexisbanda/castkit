@@ -18,6 +18,7 @@ import sys
 from castkit import __version__
 from castkit.blender import (
     BlenderNotFoundError,
+    _buscar_en_carpeta_instalacion_windows,
     localizar_blender,
     mensaje_blender_no_encontrado,
 )
@@ -77,6 +78,65 @@ def _comprobar_blender() -> bool:
                 "dar pequeñas diferencias en renders o remallado."
             )
     return True
+
+
+def _estado_blender(plataforma: str | None = None) -> tuple[str, str]:
+    """Determina el estado de Blender para `castkit comprobar --estado-blender` (#85).
+
+    Devuelve `(estado, version)`, con `version` siempre
+    `version_blender_fijada()` y `estado` uno de:
+
+    - `"ok"`: el Blender localizado es la versión fijada; o, sin serlo (por
+      `PATH` o `BLENDER_BIN`) y en Windows, hay un `blender.exe` con la
+      versión fijada en la carpeta del instalador `.msi`
+      (`_buscar_en_carpeta_instalacion_windows`, en `castkit.blender`): así
+      no se vuelve a descargar el instalador si ya está puesto a mano o por
+      el PATH de otra versión.
+    - `"falta"`: no se localizó ningún Blender (`BlenderNotFoundError`,
+      incluida una variable `BLENDER_BIN` que apunta a una ruta inexistente).
+    - `"otra"`: hay un Blender localizado pero de otra versión, o no se pudo
+      leer su versión.
+
+    `plataforma` sigue el mismo patrón testeable que `localizar_blender`
+    (ver `castkit.blender`): `None` usa `sys.platform`.
+    """
+    version_fijada = version_blender_fijada()
+    try:
+        ejecutable, origen = localizar_blender(plataforma=plataforma)
+    except BlenderNotFoundError:
+        return "falta", version_fijada
+
+    version_instalada = _version_instalada_blender(ejecutable)
+    if version_instalada is not None and version_fijada in version_instalada:
+        return "ok", version_fijada
+
+    plataforma_efectiva = plataforma if plataforma is not None else sys.platform
+    if origen in ("PATH", "variable BLENDER_BIN") and plataforma_efectiva == "win32":
+        encontrado = _buscar_en_carpeta_instalacion_windows()
+        if encontrado is not None:
+            version_en_carpeta = _version_instalada_blender(encontrado)
+            if version_en_carpeta is not None and version_fijada in version_en_carpeta:
+                return "ok", version_fijada
+
+    return "otra", version_fijada
+
+
+def imprimir_estado_blender(plataforma: str | None = None) -> int:
+    """Imprime el estado de Blender para que lo lea `install.ps1`, no personas (#85).
+
+    Dos líneas ASCII puro y nada más (sin avisos ni mensajes de error),
+    pensadas para que PowerShell las parsee línea a línea:
+
+        estado=ok|falta|otra
+        version=5.2.2
+
+    Siempre devuelve `0`: `install.ps1` decide qué hacer según `estado`, no
+    es un código de error de castkit.
+    """
+    estado, version = _estado_blender(plataforma)
+    print(f"estado={estado}")
+    print(f"version={version}")
+    return 0
 
 
 def _comprobar_extra_profundidad() -> None:

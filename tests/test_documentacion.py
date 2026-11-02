@@ -201,6 +201,25 @@ def test_la_guia_no_instala_desde_git() -> None:
     assert "releases/latest/download/install.ps1 | iex" in guia
 
 
+def test_guia_seccion_1_windows_queda_en_un_paso() -> None:
+    """Desde #85: §1 Windows es pegar una línea y leer `castkit comprobar`, sin Git, uv,
+    winget ni instalar Blender a mano como paso (Blender ya lo instala la propia línea)."""
+    guia = _GUIA_OPERADOR.read_text(encoding="utf-8")
+    inicio = guia.index("### En Windows")
+    fin = guia.index("### En Linux o macOS")
+    bloque = guia[inicio:fin]
+    assert "irm " in bloque
+
+    # Los bloques de código (la línea `irm`, con la URL del repositorio en github.com)
+    # no cuentan: lo que no debe aparecer es la instrucción de instalar Git, uv o winget
+    # como paso, en el texto que explica qué hacer.
+    prosa = re.sub(r"```.*?```", "", bloque, flags=re.DOTALL)
+
+    assert "git" not in prosa.lower()
+    assert "uv " not in prosa
+    assert "winget" not in prosa.lower()
+
+
 def test_los_comandos_de_instalacion_del_readme_usan_la_version_actual() -> None:
     """Los comandos con la rueda de una versión concreta no deben quedarse atrás al publicar."""
     versiones = set(re.findall(r"releases/download/v(\d+\.\d+\.\d+)/castkit-", _README))
