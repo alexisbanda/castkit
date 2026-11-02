@@ -1,6 +1,6 @@
 [project]
 name = "castkit"
-version = "0.1.0"
+version = "0.1.1"
 description = "Castkit — Agent-assisted pipeline that turns 3D models into production-ready mold masters and multi-cavity mold boxes for artisan casting."
 readme = "README.md"
 license = "MIT"

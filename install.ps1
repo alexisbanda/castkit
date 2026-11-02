@@ -84,6 +84,35 @@ function Convertir-A-Uri([string]$RutaOUrl) {
     return ([System.Uri]$resuelta.Path).AbsoluteUri
 }
 
+function Obtener-Url-Ultima-Rueda-Por-Redireccion {
+    # Sin la API de GitHub (403, 429, red o DNS): se sigue la redireccion de
+    # /releases/latest con una peticion HEAD, sin pasar por la API.
+    Write-Host (Tr 'Buscando la versi{o}n por otra v{i}a...')
+    $urlRueda = $null
+    try {
+        $peticion = [System.Net.HttpWebRequest]::Create('https://github.com/alexisbanda/castkit/releases/latest')
+        $peticion.Method = 'HEAD'
+        $peticion.AllowAutoRedirect = $true
+        $peticion.UserAgent = 'castkit-install.ps1'
+        $respuestaHttp = $peticion.GetResponse()
+        try {
+            $ruta = $respuestaHttp.ResponseUri.AbsolutePath
+        } finally {
+            $respuestaHttp.Close()
+        }
+        if ($ruta -match '/tag/v(\d+\.\d+\.\d+)$') {
+            $version = $Matches[1]
+            $urlRueda = "https://github.com/alexisbanda/castkit/releases/download/v$version/castkit-$version-py3-none-any.whl"
+        }
+    } catch {
+        $urlRueda = $null
+    }
+    if (-not $urlRueda) {
+        Fail (Tr 'No se pudo consultar la {u}ltima versi{o}n de castkit. Revisa la conexi{o}n a internet. Si la conexi{o}n funciona, espera hasta una hora y vuelve a pegar la l{i}nea.')
+    }
+    return $urlRueda
+}
+
 function Obtener-Url-Ultima-Rueda {
     $url = 'https://api.github.com/repos/alexisbanda/castkit/releases/latest'
     try {
@@ -95,12 +124,9 @@ function Obtener-Url-Ultima-Rueda {
         }
         if ($codigo -eq 404) {
             Fail (Tr 'Todav{i}a no hay ninguna versi{o}n publicada de castkit. Avisa a quien te mand{o} este enlace.')
-        } elseif ($codigo -eq 403) {
-            Fail (Tr 'GitHub bloque{o} temporalmente las descargas sin iniciar sesi{o}n (l{i}mite de uso). Espera unos minutos y vuelve a pegar la l{i}nea.')
-        } else {
-            Fail (Tr 'No se pudo consultar la {u}ltima versi{o}n de castkit. Revisa la conexi{o}n a internet y vuelve a pegar la l{i}nea.')
+            return $null
         }
-        return $null
+        return (Obtener-Url-Ultima-Rueda-Por-Redireccion)
     }
     $asset = $respuesta.assets | Where-Object { $_.name -match '^castkit-.*-py3-none-any\.whl$' } | Select-Object -First 1
     if (-not $asset) {

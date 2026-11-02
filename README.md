@@ -142,7 +142,7 @@ Instálalo con [uv](https://docs.astral.sh/uv/) directamente desde la rueda (`.w
 última versión:
 
 ```bash
-uv tool install "castkit[profundidad] @ https://github.com/alexisbanda/castkit/releases/download/v0.1.0/castkit-0.1.0-py3-none-any.whl" --index pytorch-cpu=https://download.pytorch.org/whl/cpu
+uv tool install "castkit[profundidad] @ https://github.com/alexisbanda/castkit/releases/download/v0.1.1/castkit-0.1.1-py3-none-any.whl" --index pytorch-cpu=https://download.pytorch.org/whl/cpu
 ```
 
 El `--index pytorch-cpu=…` es necesario: al instalar desde una rueda suelta (con `@ <url>`), el
@@ -154,7 +154,7 @@ Sin el extra opcional `profundidad` (proveedor de generación 3D, ver más abajo
 trabaja con medias figuras:
 
 ```bash
-uv tool install "castkit @ https://github.com/alexisbanda/castkit/releases/download/v0.1.0/castkit-0.1.0-py3-none-any.whl"
+uv tool install "castkit @ https://github.com/alexisbanda/castkit/releases/download/v0.1.1/castkit-0.1.1-py3-none-any.whl"
 ```
 
 Esto deja el comando `castkit` disponible en el `PATH` (sin `uv run` por delante). Para
@@ -218,8 +218,9 @@ Para publicar una nueva versión de castkit (la rueda e `install.ps1` que instal
 anterior):
 
 1. Sube `version` en [`pyproject.toml`](pyproject.toml) y `__version__` en
-   `src/castkit/__init__.py` al mismo número (por ejemplo, `0.2.0`).
-2. Haz commit de ese cambio y súbelo a `main`.
+   `src/castkit/__init__.py` al mismo número (por ejemplo, `0.2.0`), y corre `uv lock` para que
+   `uv.lock` quede con esa misma versión (la CI usa `uv sync --locked`, y sin este paso falla).
+2. Haz commit de esos cambios (incluido `uv.lock`) y súbelo a `main`.
 3. Etiqueta ese commit y empuja la etiqueta:
 
    ```bash
