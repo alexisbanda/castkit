@@ -42,14 +42,13 @@ Etapa 'entorno' {
     "PSVersion: $($PSVersionTable.PSVersion)"
 }
 
-# 1. Instalar uv como lo haría el operador (instalador oficial de PowerShell).
-Etapa 'instalar-uv' {
-    powershell -NoProfile -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-}
 $UvBin = Join-Path $HOME '.local\bin'
 
 # 2. install.ps1 -Rueda <rueda>, como archivo: la instalación real (#80).
+# uv todavía no está instalado en esta máquina: esta etapa es la que debe
+# instalarlo (la rama "uv falta" de install.ps1).
 Etapa 'instalar-con-rueda' {
+    "uv en PATH: $([bool](Get-Command uv -ErrorAction SilentlyContinue))  $UvBin\uv.exe existe: $(Test-Path (Join-Path $UvBin 'uv.exe'))"
     powershell -NoProfile -ExecutionPolicy ByPass -File $InstallPs1 -Rueda $RuedaWhl
 }
 
