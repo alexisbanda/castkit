@@ -1,0 +1,96 @@
+name: Release
+
+# Con etiqueta v*: comprueba que coincide con pyproject.toml, corre los tests (reutilizando
+# ci.yml), construye la rueda y publica la release de GitHub con la rueda e install.ps1.
+#
+# En seco (workflow_dispatch, o un pull_request que toque este archivo, install.ps1 o
+# pyproject.toml): corre los mismos tests y construye la rueda, pero no publica nada.
+# workflow_dispatch no se puede lanzar hasta que este archivo esté en la rama por defecto,
+# así que el disparador por pull_request cubre el ensayo en seco antes de ese primer merge.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - install.ps1
+      - pyproject.toml
+
+permissions:
+  contents: read
+
+jobs:
+  comprobar-etiqueta:
+    name: Comprobar que la etiqueta coincide con pyproject.toml
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Comparar la etiqueta con la versión de pyproject.toml
+        run: |
+          set -euo pipefail
+          VERSION="$(grep -m1 '^version = ' pyproject.toml | sed -E 's/version = "(.*)"/\1/')"
+          TAG="${GITHUB_REF_NAME}"
+          echo "Versión en pyproject.toml: $VERSION"
+          echo "Etiqueta empujada: $TAG"
+          if [ "$TAG" != "v$VERSION" ]; then
+            echo "La etiqueta $TAG no coincide con la versión $VERSION de pyproject.toml." >&2
+            exit 1
+          fi
+
+  tests:
+    name: Tests (reutiliza ci.yml)
+    needs: comprobar-etiqueta
+    if: always() && (needs.comprobar-etiqueta.result == 'success' || needs.comprobar-etiqueta.result == 'skipped')
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    name: Construir la rueda
+    needs: tests
+    if: always() && needs.tests.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Instalar uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Construir
+        run: uv build
+
+      - name: Subir artefactos (rueda + install.ps1)
+        uses: actions/upload-artifact@v4
+        with:
+          name: castkit-release
+          path: |
+            dist/*.whl
+            install.ps1
+
+  publicar:
+    name: Publicar la release en GitHub
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Descargar artefactos
+        uses: actions/download-artifact@v4
+        with:
+          name: castkit-release
+
+      - name: Crear la release de GitHub
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "${GITHUB_REF_NAME}" dist/*.whl install.ps1 \
+            --repo "${{ github.repository }}" \
+            --title "castkit ${GITHUB_REF_NAME}" \
+            --generate-notes

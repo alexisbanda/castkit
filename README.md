@@ -114,37 +114,55 @@ estimados y 27,1 cm³ de volumen por figura. En `output/` quedan `toro-prof_v1_m
 
 ## Instalación para usar castkit
 
-Para usar castkit como herramienta, sin clonar el repositorio, instálalo con
-[uv](https://docs.astral.sh/uv/) directamente desde GitHub (el repositorio es privado: necesita
-Git instalado y que tu cuenta de GitHub esté añadida como colaboradora del repositorio).
+Para usar castkit como herramienta, sin clonar el repositorio ni tener Git instalado, instala la
+última versión publicada en [Releases](https://github.com/alexisbanda/castkit/releases).
 
-**Nota:** esta forma de instalar es provisional, mientras se decide la vía de distribución
-definitiva ([#80](https://github.com/alexisbanda/castkit/issues/80)).
+### Windows
 
-```bash
-uv tool install "castkit[profundidad] @ git+https://github.com/alexisbanda/castkit.git"
+Abre PowerShell (no necesitas abrirlo como administrador) y pega:
 
-# Sin el extra opcional `profundidad` (proveedor de generación 3D, ver más abajo), para quien no
-# trabaja con medias figuras:
-uv tool install "castkit @ git+https://github.com/alexisbanda/castkit.git"
+```powershell
+irm https://github.com/alexisbanda/castkit/releases/latest/download/install.ps1 | iex
 ```
 
-La primera vez, Git puede abrir el navegador para que inicies sesión en GitHub (es el gestor de
-credenciales de Git, que comprueba el acceso al repositorio); inicia sesión con tu cuenta y sigue.
-Paso a paso, con qué hacer en Windows, en la [guía del operador, sección «Instalar y
+Instala [uv](https://docs.astral.sh/uv/) si falta, instala castkit (con el extra `profundidad`,
+ver más abajo) y termina ejecutando `castkit comprobar`. Si PowerShell bloquea el script por su
+política de ejecución (mensaje sobre scripts deshabilitados), pega esto en su lugar:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://github.com/alexisbanda/castkit/releases/latest/download/install.ps1 | iex"
+```
+
+Paso a paso, con capturas, en la [guía del operador, sección «Instalar y
 comprobar»](docs/guia-operador.md#1-instalar-y-comprobar).
 
-Si ya tienes una clave SSH propia en GitHub, puedes usar esa forma en su lugar:
+### Linux / macOS
+
+Instálalo con [uv](https://docs.astral.sh/uv/) directamente desde la rueda (`.whl`) de la
+última versión:
 
 ```bash
-uv tool install "castkit[profundidad] @ git+ssh://git@github.com/alexisbanda/castkit.git"
+uv tool install "castkit[profundidad] @ https://github.com/alexisbanda/castkit/releases/download/v0.1.0/castkit-0.1.0-py3-none-any.whl" --index pytorch-cpu=https://download.pytorch.org/whl/cpu
+```
+
+El `--index pytorch-cpu=…` es necesario: al instalar desde una rueda suelta (con `@ <url>`), el
+índice que `pyproject.toml` fija en `[tool.uv.sources]` para `torch` (ver «Extra opcional
+`profundidad`», abajo) no se aplica; sin él, `uv` instalaría `torch` desde PyPI con soporte CUDA,
+varios gigabytes más pesado.
+
+Sin el extra opcional `profundidad` (proveedor de generación 3D, ver más abajo), para quien no
+trabaja con medias figuras:
+
+```bash
+uv tool install "castkit @ https://github.com/alexisbanda/castkit/releases/download/v0.1.0/castkit-0.1.0-py3-none-any.whl"
 ```
 
 Esto deja el comando `castkit` disponible en el `PATH` (sin `uv run` por delante). Para
-actualizarlo a la última versión:
+actualizar a una versión más reciente, repite el mismo comando con la URL de esa versión y
+`--force`:
 
 ```bash
-uv tool upgrade castkit
+uv tool install --force "castkit[profundidad] @ https://github.com/alexisbanda/castkit/releases/download/vX.Y.Z/castkit-X.Y.Z-py3-none-any.whl" --index pytorch-cpu=https://download.pytorch.org/whl/cpu
 ```
 
 Después de instalar (o de actualizar), `castkit comprobar` confirma que todo quedó en orden
@@ -193,6 +211,26 @@ uv sync --extra profundidad
 fuera de macOS, donde las ruedas de PyPI ya son para CPU) para instalar la rueda de PyTorch para
 CPU en vez de la variante con CUDA. Sin este extra instalado, el resto de castkit funciona igual
 y `castkit generar --proveedor profundidad` termina con un mensaje que explica cómo instalarlo.
+
+## Publicar una versión
+
+Para publicar una nueva versión de castkit (la rueda e `install.ps1` que instala todo lo
+anterior):
+
+1. Sube `version` en [`pyproject.toml`](pyproject.toml) y `__version__` en
+   `src/castkit/__init__.py` al mismo número (por ejemplo, `0.2.0`).
+2. Haz commit de ese cambio y súbelo a `main`.
+3. Etiqueta ese commit y empuja la etiqueta:
+
+   ```bash
+   git tag v0.2.0
+   git push origin v0.2.0
+   ```
+
+Al empujar una etiqueta `v*`, [`release.yml`](.github/workflows/release.yml) comprueba que la
+etiqueta coincide con `version` de `pyproject.toml` (falla si no), corre los tests, construye la
+rueda con `uv build` y crea la *release* de GitHub con la rueda
+(`castkit-<versión>-py3-none-any.whl`) e `install.ps1` adjuntos.
 
 ## Tests
 
