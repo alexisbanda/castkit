@@ -19,6 +19,7 @@ import castkit
 
 _RAIZ = Path(__file__).resolve().parents[1]
 _PYPROJECT = _RAIZ / "pyproject.toml"
+_UV_LOCK = _RAIZ / "uv.lock"
 _INSTALL_PS1 = (_RAIZ / "install.ps1").read_text(encoding="utf-8")
 _RELEASE_YML = (_RAIZ / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
 _CI_YML = (_RAIZ / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
@@ -40,6 +41,13 @@ def test_version_de_castkit_coincide_con_pyproject() -> None:
     assert castkit.__version__ == _version_pyproject()
 
 
+def test_uv_lock_tiene_la_misma_version_de_castkit_que_pyproject() -> None:
+    texto = _UV_LOCK.read_text(encoding="utf-8")
+    coincidencia = re.search(r'name = "castkit"\nversion = "([0-9]+\.[0-9]+\.[0-9]+)"', texto)
+    assert coincidencia, "No se encontró la versión de castkit en uv.lock"
+    assert coincidencia.group(1) == _version_pyproject()
+
+
 # ---------------------------------------------------------------------------
 # install.ps1
 # ---------------------------------------------------------------------------
@@ -49,6 +57,15 @@ def test_install_ps1_usa_la_api_de_releases_sin_autenticar() -> None:
     assert "api.github.com/repos/alexisbanda/castkit/releases/latest" in _INSTALL_PS1
     assert "Authorization" not in _INSTALL_PS1
     assert "GH_TOKEN" not in _INSTALL_PS1
+
+
+def test_install_ps1_tiene_respaldo_sin_api_por_releases_latest() -> None:
+    assert "github.com/alexisbanda/castkit/releases/latest" in _INSTALL_PS1
+    assert "ResponseUri" in _INSTALL_PS1
+
+
+def test_install_ps1_ya_no_dice_espera_unos_minutos() -> None:
+    assert "unos minutos" not in _INSTALL_PS1
 
 
 def test_install_ps1_instala_el_extra_profundidad_con_force() -> None:
@@ -181,3 +198,8 @@ def test_readme_documenta_como_publicar_una_version() -> None:
     assert "## Publicar una versión" in _README
     assert "git tag v" in _README
     assert "git push origin v" in _README
+
+
+def test_readme_publicar_una_version_menciona_uv_lock() -> None:
+    bloque_publicar = _README.split("## Publicar una versión")[1].split("## ")[0]
+    assert "uv lock" in bloque_publicar
