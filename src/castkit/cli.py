@@ -9,7 +9,7 @@ import sys
 from datetime import date, timedelta
 from pathlib import Path
 
-from castkit.comprobar import comprobar_instalacion
+from castkit.comprobar import comprobar_instalacion, imprimir_estado_blender
 from castkit.config import (
     ConfigError,
     cargar_config_limpieza,
@@ -399,9 +399,17 @@ def _construir_parser() -> argparse.ArgumentParser:
         help="Aprueba el punto de control 1 sin preguntar (para scripts o CI).",
     )
 
-    subparsers.add_parser(
+    comprobar = subparsers.add_parser(
         "comprobar",
         help="Comprueba que la instalación de castkit esté lista (Blender, configuración, etc.).",
+    )
+    comprobar.add_argument(
+        "--estado-blender",
+        dest="estado_blender",
+        action="store_true",
+        help="Para que lo use install.ps1, no pensada para personas: en vez de la comprobación "
+        "completa, imprime solo «estado=ok|falta|otra» y «version=<versión fijada>», y "
+        "siempre termina con código 0.",
     )
 
     return parser
@@ -1694,6 +1702,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.comando == "flujo":
         return _ejecutar_flujo(args)
     if args.comando == "comprobar":
+        if getattr(args, "estado_blender", False):
+            return imprimir_estado_blender()
         return comprobar_instalacion()
 
     parser.print_help(sys.stderr)

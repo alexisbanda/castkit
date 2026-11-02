@@ -126,11 +126,22 @@ irm https://github.com/alexisbanda/castkit/releases/latest/download/install.ps1 
 ```
 
 Instala [uv](https://docs.astral.sh/uv/) si falta, instala castkit (con el extra `profundidad`,
-ver más abajo) y termina ejecutando `castkit comprobar`. Si PowerShell bloquea el script por su
-política de ejecución (mensaje sobre scripts deshabilitados), pega esto en su lugar:
+ver más abajo), instala Blender en la versión que castkit fija si no está ya (descarga el `.msi`
+oficial de blender.org y lo instala con `msiexec /passive`; Windows pedirá permiso de
+administrador en una ventana aparte) y termina ejecutando `castkit comprobar`. Si PowerShell
+bloquea el script por su política de ejecución (mensaje sobre scripts deshabilitados), pega esto
+en su lugar:
 
 ```powershell
 powershell -ExecutionPolicy ByPass -c "irm https://github.com/alexisbanda/castkit/releases/latest/download/install.ps1 | iex"
+```
+
+Para saltar la instalación de Blender (por ejemplo, si ya tienes una versión propia que no
+quieres que castkit toque), usa `-SinBlender`; con `iex` no se pueden pasar parámetros, así que
+en ese caso hay que construir el script antes de ejecutarlo:
+
+```powershell
+& ([scriptblock]::Create((irm https://github.com/alexisbanda/castkit/releases/latest/download/install.ps1))) -SinBlender
 ```
 
 Paso a paso, con capturas, en la [guía del operador, sección «Instalar y
@@ -295,6 +306,21 @@ Informa, en español y línea a línea:
 
 Termina con código `0` si Blender está disponible y la configuración es válida; si no, termina
 con código distinto de `0` y explica qué corregir.
+
+### `castkit comprobar --estado-blender`
+
+Pensada para que la lea `install.ps1` (ver «Windows», arriba), no para personas: en vez de la
+comprobación completa, imprime solo dos líneas y siempre termina con código `0`:
+
+```text
+estado=ok|falta|otra
+version=5.2.2
+```
+
+`version` es la que castkit fija (`.blender-version`). `estado` es `ok` si el Blender localizado
+es esa versión (o, sin serlo por `PATH`/`BLENDER_BIN`, hay una carpeta de instalación en Windows
+con esa versión, para no volver a descargar el `.msi`); `falta` si no se encontró ningún Blender;
+`otra` si se encontró uno de otra versión, o no se pudo leer la suya.
 
 ## Dar de alta un diseño
 
