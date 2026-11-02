@@ -103,6 +103,10 @@ def test_install_ps1_fija_tls12_antes_de_descargar() -> None:
     assert "Tls12" in _INSTALL_PS1
 
 
+def test_install_ps1_comprueba_que_castkit_exista_antes_de_ejecutarlo() -> None:
+    assert "Get-Command castkit" in _INSTALL_PS1
+
+
 # ---------------------------------------------------------------------------
 # .github/workflows/release.yml
 # ---------------------------------------------------------------------------

@@ -41,7 +41,7 @@ function Fail {
     if ($PSCommandPath) {
         exit 1
     } else {
-        throw $Mensaje
+        throw (Tr 'La instalaci{o}n de castkit no termin{o}.')
     }
 }
 
@@ -133,6 +133,9 @@ if ($LASTEXITCODE -eq 0 -and $CastkitBinDir) {
 }
 
 # 5. Comprobar que castkit se puede ejecutar, y correr `castkit comprobar`.
+if (-not (Get-Command castkit -ErrorAction SilentlyContinue)) {
+    Fail (Tr 'castkit se instal{o} pero no se puede ejecutar en esta ventana. Revisa los mensajes anteriores y vuelve a pegar la l{i}nea de instalaci{o}n.')
+}
 & castkit --help *> $null
 if ($LASTEXITCODE -ne 0) {
     Fail (Tr 'castkit se instal{o} pero no se puede ejecutar en esta ventana. Revisa los mensajes anteriores y vuelve a pegar la l{i}nea de instalaci{o}n.')
