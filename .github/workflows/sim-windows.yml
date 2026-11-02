@@ -50,17 +50,6 @@ jobs:
           name: castkit-para-sim
           path: paquete
 
-      - name: Instalar Blender con el instalador .msi (como un usuario)
-        shell: pwsh
-        run: |
-          $v = Get-Content .blender-version
-          $mm = ($v -split '\.')[0..1] -join '.'
-          $msi = "$env:RUNNER_TEMP\blender.msi"
-          Invoke-WebRequest "https://download.blender.org/release/Blender$mm/blender-$v-windows-x64.msi" -OutFile $msi
-          Start-Process msiexec -ArgumentList '/i', $msi, '/qn', '/norestart' -Wait
-          Get-ChildItem 'C:\Program Files\Blender Foundation' -Recurse -Filter blender.exe | Select-Object FullName
-          "¿blender en PATH?: $([bool](Get-Command blender -ErrorAction SilentlyContinue))"
-
       - name: Quitar Git y uv del PATH (Windows limpio, sin gestores instalados)
         shell: pwsh
         run: |

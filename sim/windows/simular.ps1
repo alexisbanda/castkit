@@ -44,47 +44,49 @@ Etapa 'entorno' {
 
 $UvBin = Join-Path $HOME '.local\bin'
 
-# 2. La línea real de instalación, bajo iex y sin argumentos, con el install.ps1 de esta
-# rama (#80). Todavía no existe la release v0.1.1, así que resuelve y trae la última
-# release publicada de verdad (v0.1.0); sin uv en la máquina.
-Etapa 'linea-iex' {
-    "uv en PATH: $([bool](Get-Command uv -ErrorAction SilentlyContinue))  $UvBin\uv.exe existe: $(Test-Path (Join-Path $UvBin 'uv.exe'))"
-    Push-Location (Split-Path $InstallPs1)
-    try {
-        powershell -NoProfile -ExecutionPolicy ByPass -c "irm https://github.com/alexisbanda/castkit/releases/latest/download/install.ps1 | iex"
-    } finally {
-        Pop-Location
-    }
+function Estado-Blender {
+    "Blender en Program Files: $([bool](Get-ChildItem 'C:\Program Files\Blender Foundation' -Recurse -Filter blender.exe -ErrorAction SilentlyContinue))"
+    "msi en TEMP: $(Test-Path (Join-Path $env:TEMP 'castkit-blender-*.msi'))"
 }
 
-# 3. La misma línea, pero sin que la API de GitHub responda (#80: el límite de 60
-# consultas/hora por IP sin autenticar). Debe caer a la vía de respaldo por
-# releases/latest y terminar instalando igual.
-Etapa 'linea-iex-sin-api' {
-    $HostsPath = 'C:\Windows\System32\drivers\etc\hosts'
-    $HostsOriginal = Get-Content -Raw $HostsPath
-    $CodigoInstalacion = 1
-    try {
-        Add-Content -Encoding ascii $HostsPath "`n127.0.0.1 api.github.com`n"
-        ipconfig /flushdns | Out-Null
-        try {
-            Invoke-WebRequest -Uri 'https://api.github.com' -UseBasicParsing -TimeoutSec 5 | Out-Null
-            'Invoke-WebRequest https://api.github.com: respondió (no quedó bloqueada como se esperaba)'
-        } catch {
-            'Invoke-WebRequest https://api.github.com: ya no responde (bloqueada a propósito para esta prueba)'
-        }
-        Push-Location (Split-Path $InstallPs1)
-        try {
-            powershell -NoProfile -ExecutionPolicy ByPass -c "irm https://github.com/alexisbanda/castkit/releases/latest/download/install.ps1 | iex"
-            $CodigoInstalacion = $LASTEXITCODE
-        } finally {
-            Pop-Location
-        }
-    } finally {
-        Set-Content -Encoding ascii $HostsPath $HostsOriginal
-        ipconfig /flushdns | Out-Null
-        $global:LASTEXITCODE = $CodigoInstalacion
-    }
+# 2. El install.ps1 de esta rama bajo iex, como la línea real, con la rueda ya publicada
+# (no conoce --estado-blender): debe avisar, saltar Blender y terminar.
+Etapa 'iex-rueda-sin-estado-blender' {
+    Estado-Blender
+    powershell -NoProfile -ExecutionPolicy ByPass -c "Get-Content -Raw '$InstallPs1' | iex"
+    $codigo = $LASTEXITCODE
+    Estado-Blender
+    $global:LASTEXITCODE = $codigo
+}
+
+# 3. -SinBlender, en la forma documentada: no descarga nada.
+Etapa 'sin-blender' {
+    powershell -NoProfile -ExecutionPolicy ByPass -c "& ([scriptblock]::Create((Get-Content -Raw '$InstallPs1'))) -Rueda '$RuedaWhl' -SinBlender"
+    $codigo = $LASTEXITCODE
+    Estado-Blender
+    $global:LASTEXITCODE = $codigo
+}
+
+# 4. Huella incorrecta: no instala, borra el msi, castkit queda instalado.
+Etapa 'sha256-incorrecto' {
+    powershell -NoProfile -ExecutionPolicy ByPass -File $InstallPs1 -Rueda $RuedaWhl -Sha256BlenderDePrueba 0000000000000000000000000000000000000000000000000000000000000000
+    $codigo = $LASTEXITCODE
+    Estado-Blender
+    $global:LASTEXITCODE = $codigo
+}
+
+# 5. Sin Blender: lo descarga con el sha256 oficial, lo instala y comprobar lo encuentra.
+Etapa 'instala-blender' {
+    Estado-Blender
+    powershell -NoProfile -ExecutionPolicy ByPass -c "& ([scriptblock]::Create((Get-Content -Raw '$InstallPs1'))) -Rueda '$RuedaWhl'"
+    $codigo = $LASTEXITCODE
+    Estado-Blender
+    $global:LASTEXITCODE = $codigo
+}
+
+# 5b. Repetir: no vuelve a descargar.
+Etapa 'repetir-no-descarga' {
+    powershell -NoProfile -ExecutionPolicy ByPass -c "& ([scriptblock]::Create((Get-Content -Raw '$InstallPs1'))) -Rueda '$RuedaWhl'"
 }
 
 # 4. -Rueda con una ruta que no existe: debe fallar con un mensaje en español.
