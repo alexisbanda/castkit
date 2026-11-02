@@ -44,15 +44,47 @@ Etapa 'entorno' {
 
 $UvBin = Join-Path $HOME '.local\bin'
 
-# 2. La línea real de instalación contra la release publicada, sin uv en la máquina (#80).
-Etapa 'linea-real' {
+# 2. La línea real de instalación, bajo iex y sin argumentos, con el install.ps1 de esta
+# rama (#80). Todavía no existe la release v0.1.1, así que resuelve y trae la última
+# release publicada de verdad (v0.1.0); sin uv en la máquina.
+Etapa 'linea-iex' {
     "uv en PATH: $([bool](Get-Command uv -ErrorAction SilentlyContinue))  $UvBin\uv.exe existe: $(Test-Path (Join-Path $UvBin 'uv.exe'))"
-    powershell -NoProfile -ExecutionPolicy ByPass -c "irm https://github.com/alexisbanda/castkit/releases/latest/download/install.ps1 | iex"
+    Push-Location (Split-Path $InstallPs1)
+    try {
+        powershell -NoProfile -ExecutionPolicy ByPass -c "Get-Content -Raw install.ps1 | iex"
+    } finally {
+        Pop-Location
+    }
 }
 
-# 3. Repetirla (como una actualización): debe volver a funcionar.
-Etapa 'linea-real-repetida' {
-    powershell -NoProfile -ExecutionPolicy ByPass -c "irm https://github.com/alexisbanda/castkit/releases/latest/download/install.ps1 | iex"
+# 3. La misma línea, pero sin que la API de GitHub responda (#80: el límite de 60
+# consultas/hora por IP sin autenticar). Debe caer a la vía de respaldo por
+# releases/latest y terminar instalando igual.
+Etapa 'linea-iex-sin-api' {
+    $HostsPath = 'C:\Windows\System32\drivers\etc\hosts'
+    $HostsOriginal = Get-Content -Raw $HostsPath
+    $CodigoInstalacion = 1
+    try {
+        Add-Content -Encoding ascii $HostsPath "`n127.0.0.1 api.github.com`n"
+        ipconfig /flushdns | Out-Null
+        try {
+            Invoke-WebRequest -Uri 'https://api.github.com' -UseBasicParsing -TimeoutSec 5 | Out-Null
+            'Invoke-WebRequest https://api.github.com: respondió (no quedó bloqueada como se esperaba)'
+        } catch {
+            'Invoke-WebRequest https://api.github.com: ya no responde (bloqueada a propósito para esta prueba)'
+        }
+        Push-Location (Split-Path $InstallPs1)
+        try {
+            powershell -NoProfile -ExecutionPolicy ByPass -c "Get-Content -Raw install.ps1 | iex"
+            $CodigoInstalacion = $LASTEXITCODE
+        } finally {
+            Pop-Location
+        }
+    } finally {
+        Set-Content -Encoding ascii $HostsPath $HostsOriginal
+        ipconfig /flushdns | Out-Null
+        $global:LASTEXITCODE = $CodigoInstalacion
+    }
 }
 
 # 4. -Rueda con una ruta que no existe: debe fallar con un mensaje en español.
