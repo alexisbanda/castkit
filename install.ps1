@@ -194,7 +194,7 @@ function Instalar-Blender-Si-Falta {
     try {
         $salidaEstado = & castkit comprobar --estado-blender 2>$null
         if ($LASTEXITCODE -ne 0 -or -not $salidaEstado) {
-            Write-Host (Tr 'Aviso: no se pudo comprobar el estado de Blender; se omite este paso. Si falta, instalalo a mano desde blender.org.') -ForegroundColor Yellow
+            Write-Host (Tr 'Aviso: no se pudo comprobar el estado de Blender; se omite este paso. Si falta, instal{a}lo a mano desde blender.org.') -ForegroundColor Yellow
             return
         }
 
@@ -206,7 +206,7 @@ function Instalar-Blender-Si-Falta {
         }
 
         if (-not $estado -or -not $version) {
-            Write-Host (Tr 'Aviso: no se entendi{o} la respuesta de castkit sobre Blender; se omite este paso. Si falta, instalalo a mano desde blender.org.') -ForegroundColor Yellow
+            Write-Host (Tr 'Aviso: no se entendi{o} la respuesta de castkit sobre Blender; se omite este paso. Si falta, instal{a}lo a mano desde blender.org.') -ForegroundColor Yellow
             return
         }
 
@@ -223,7 +223,7 @@ function Instalar-Blender-Si-Falta {
 
         $mayorMenor = Obtener-MayorMenor $version
         if (-not $mayorMenor) {
-            Write-Host (Tr "Aviso: no se entendi{o} el n{u}mero de versi{o}n de Blender (`"$version`"); se omite este paso. Instalalo a mano desde blender.org.") -ForegroundColor Yellow
+            Write-Host (Tr "Aviso: no se entendi{o} el n{u}mero de versi{o}n de Blender (`"$version`"); se omite este paso. Instal{a}lo a mano desde blender.org.") -ForegroundColor Yellow
             return
         }
 
@@ -239,7 +239,7 @@ function Instalar-Blender-Si-Falta {
             }
             $contenidoSha = (Invoke-WebRequest -Uri $urlSha256 -UseBasicParsing -ErrorAction Stop).Content
             foreach ($lineaSha in ($contenidoSha -split "`n")) {
-                if ($lineaSha -match [regex]::Escape($nombreMsi)) {
+                if ($lineaSha -match ([regex]::Escape($nombreMsi) + '\s*$')) {
                     return ($lineaSha.Trim() -split '\s+')[0].ToUpper()
                 }
             }
@@ -253,7 +253,7 @@ function Instalar-Blender-Si-Falta {
             $shaEsperado = $null
         }
         if (-not $shaEsperado) {
-            Write-Host (Tr 'No se pudo obtener la huella (sha256) oficial de Blender; no se instala. Puedes instalarlo a mano desde blender.org. castkit ya qued{o} instalado.') -ForegroundColor Yellow
+            Write-Host (Tr "No se pudo obtener la huella (sha256) oficial de Blender; no se instala. Puedes instalarlo a mano desde $urlMsi. castkit ya qued{o} instalado.") -ForegroundColor Yellow
             return
         }
 
@@ -288,14 +288,14 @@ function Instalar-Blender-Si-Falta {
             }
 
             if (-not $descargaOk -or -not (Test-Path -LiteralPath $msi)) {
-                Write-Host (Tr 'No se pudo descargar Blender. Puedes instalarlo a mano desde blender.org. castkit ya qued{o} instalado.') -ForegroundColor Yellow
+                Write-Host (Tr "No se pudo descargar Blender. Puedes instalarlo a mano desde $urlMsi. castkit ya qued{o} instalado.") -ForegroundColor Yellow
                 return
             }
 
             $shaActual = (Get-FileHash -Algorithm SHA256 -LiteralPath $msi).Hash.ToUpper()
             if ($shaActual -ne $shaEsperado) {
                 Remove-Item -LiteralPath $msi -Force -ErrorAction SilentlyContinue
-                Write-Host (Tr 'El archivo descargado de Blender no coincide con lo esperado (sha256); no se instala. Puedes instalarlo a mano desde blender.org. castkit ya qued{o} instalado.') -ForegroundColor Yellow
+                Write-Host (Tr "El archivo descargado de Blender no coincide con lo esperado (sha256); no se instala. Puedes instalarlo a mano desde $urlMsi. castkit ya qued{o} instalado.") -ForegroundColor Yellow
                 return
             }
         }
@@ -307,9 +307,9 @@ function Instalar-Blender-Si-Falta {
             Remove-Item -LiteralPath $msi -Force -ErrorAction SilentlyContinue
             Write-Host (Tr 'Blender qued{o} instalado.') -ForegroundColor Green
         } elseif ($p.ExitCode -eq 1602 -or $p.ExitCode -eq 1223) {
-            Write-Host (Tr 'No se dio el permiso para instalar Blender. Puedes instalarlo a mano desde blender.org, o volver a pegar esta l{i}nea para reintentarlo (el instalador descargado no se vuelve a bajar). castkit ya qued{o} instalado.') -ForegroundColor Yellow
+            Write-Host (Tr "No se dio el permiso para instalar Blender. Puedes instalarlo a mano desde $urlMsi, o volver a pegar esta l{i}nea para reintentarlo (el instalador descargado no se vuelve a bajar). castkit ya qued{o} instalado.") -ForegroundColor Yellow
         } else {
-            Write-Host (Tr "La instalaci{o}n de Blender termin{o} con un problema (c{o}digo $($p.ExitCode)). Puedes instalarlo a mano desde blender.org. castkit ya qued{o} instalado.") -ForegroundColor Yellow
+            Write-Host (Tr "La instalaci{o}n de Blender termin{o} con un problema (c{o}digo $($p.ExitCode)). Puedes instalarlo a mano desde $urlMsi. castkit ya qued{o} instalado.") -ForegroundColor Yellow
         }
     } catch {
         Write-Host (Tr "No se pudo completar la instalaci{o}n de Blender ($($_.Exception.Message)). Puedes instalarlo a mano desde blender.org. castkit ya qued{o} instalado.") -ForegroundColor Yellow
@@ -318,7 +318,7 @@ function Instalar-Blender-Si-Falta {
 
 Instalar-Blender-Si-Falta
 
-# 6. Comprobar que castkit se puede ejecutar, y correr `castkit comprobar`.
+# 6. Correr `castkit comprobar`.
 Write-Host ''
 Write-Host (Tr 'castkit qued{o} instalado. Comprobando que todo est{e} en orden...') -ForegroundColor Green
 & castkit comprobar
