@@ -51,7 +51,7 @@ Etapa 'linea-iex' {
     "uv en PATH: $([bool](Get-Command uv -ErrorAction SilentlyContinue))  $UvBin\uv.exe existe: $(Test-Path (Join-Path $UvBin 'uv.exe'))"
     Push-Location (Split-Path $InstallPs1)
     try {
-        powershell -NoProfile -ExecutionPolicy ByPass -c "Get-Content -Raw install.ps1 | iex"
+        powershell -NoProfile -ExecutionPolicy ByPass -c "irm https://github.com/alexisbanda/castkit/releases/latest/download/install.ps1 | iex"
     } finally {
         Pop-Location
     }
@@ -75,7 +75,7 @@ Etapa 'linea-iex-sin-api' {
         }
         Push-Location (Split-Path $InstallPs1)
         try {
-            powershell -NoProfile -ExecutionPolicy ByPass -c "Get-Content -Raw install.ps1 | iex"
+            powershell -NoProfile -ExecutionPolicy ByPass -c "irm https://github.com/alexisbanda/castkit/releases/latest/download/install.ps1 | iex"
             $CodigoInstalacion = $LASTEXITCODE
         } finally {
             Pop-Location
