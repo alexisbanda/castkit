@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 import castkit.config as config_mod
+from castkit import __version__
 from castkit.blender import BlenderNotFoundError
 from castkit.cli import main
 from castkit.config import (
@@ -298,7 +299,9 @@ def test_comprobar_informa_extra_profundidad(
     else:
         assert "Extra «profundidad»: no instalado" in salida
         assert "uv tool install" in salida
-        assert "git+https://github.com/alexisbanda/castkit.git" in salida
+        assert "git+https" not in salida
+        assert "install.ps1 | iex" in salida
+        assert f"/v{__version__}/castkit-{__version__}-py3-none-any.whl" in salida
         assert "uv tool install '" not in salida
 
 

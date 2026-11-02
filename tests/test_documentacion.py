@@ -17,6 +17,7 @@ import re
 import tomllib
 from pathlib import Path
 
+from castkit import __version__
 from castkit.cli import _construir_parser
 
 _RAIZ = Path(__file__).resolve().parents[1]
@@ -70,12 +71,12 @@ def _slug_github(encabezado: str) -> str:
     """Genera el ancla que GitHub asignaría a un encabezado de Markdown.
 
     Minúsculas; se quita todo lo que no sea letra (se conservan tildes y «ñ»), número,
-    espacio o guion; los espacios se convierten en guiones.
+    espacio o guion; cada espacio se convierte en un guion («Linux / macOS» → `linux--macos`).
     """
 
     texto = encabezado.lower()
     texto = "".join(ch for ch in texto if ch.isalnum() or ch in (" ", "-"))
-    return re.sub(r"\s+", "-", texto)
+    return re.sub(r"\s", "-", texto)
 
 
 def _anclas_disponibles(texto: str = _README) -> set[str]:
@@ -189,4 +190,20 @@ def test_ningun_uv_tool_install_con_comillas_simples() -> None:
     assert not encontrados, (
         "«uv tool install '» con comillas simples falla en cmd en Windows (#78); "
         "usa comillas dobles. Encontrado en: " + ", ".join(encontrados)
+    )
+
+
+def test_la_guia_no_instala_desde_git() -> None:
+    """Desde #80 se instala desde la release: sin Git ni ser colaborador del repositorio."""
+    guia = _GUIA_OPERADOR.read_text(encoding="utf-8")
+    assert "git+https" not in guia
+    assert "colaborador" not in guia
+    assert "releases/latest/download/install.ps1 | iex" in guia
+
+
+def test_los_comandos_de_instalacion_del_readme_usan_la_version_actual() -> None:
+    """Los comandos con la rueda de una versión concreta no deben quedarse atrás al publicar."""
+    versiones = set(re.findall(r"releases/download/v(\d+\.\d+\.\d+)/castkit-", _README))
+    assert versiones == {__version__}, (
+        f"README.md instala {sorted(versiones)}, pero la versión actual es {__version__}."
     )
