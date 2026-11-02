@@ -44,17 +44,15 @@ Etapa 'entorno' {
 
 $UvBin = Join-Path $HOME '.local\bin'
 
-# 2. install.ps1 -Rueda <rueda>, como archivo: la instalación real (#80).
-# uv todavía no está instalado en esta máquina: esta etapa es la que debe
-# instalarlo (la rama "uv falta" de install.ps1).
-Etapa 'instalar-con-rueda' {
+# 2. La línea real de instalación contra la release publicada, sin uv en la máquina (#80).
+Etapa 'linea-real' {
     "uv en PATH: $([bool](Get-Command uv -ErrorAction SilentlyContinue))  $UvBin\uv.exe existe: $(Test-Path (Join-Path $UvBin 'uv.exe'))"
-    powershell -NoProfile -ExecutionPolicy ByPass -File $InstallPs1 -Rueda $RuedaWhl
+    powershell -NoProfile -ExecutionPolicy ByPass -c "irm https://github.com/alexisbanda/castkit/releases/latest/download/install.ps1 | iex"
 }
 
-# 3. Repetirlo (como una actualización): debe volver a funcionar.
-Etapa 'reinstalar-actualizar' {
-    powershell -NoProfile -ExecutionPolicy ByPass -File $InstallPs1 -Rueda $RuedaWhl
+# 3. Repetirla (como una actualización): debe volver a funcionar.
+Etapa 'linea-real-repetida' {
+    powershell -NoProfile -ExecutionPolicy ByPass -c "irm https://github.com/alexisbanda/castkit/releases/latest/download/install.ps1 | iex"
 }
 
 # 4. -Rueda con una ruta que no existe: debe fallar con un mensaje en español.
@@ -62,16 +60,6 @@ Etapa 'rueda-inexistente' {
     powershell -NoProfile -ExecutionPolicy ByPass -File $InstallPs1 -Rueda 'C:\no-existe-esta-rueda-de-prueba.whl'
 }
 
-# 5. Bajo iex real, sin argumentos: todavía no hay ninguna release publicada de
-# castkit, así que la API de GitHub debe responder 404 y el mensaje debe decirlo.
-Etapa 'iex-sin-argumentos-sin-release' {
-    Push-Location (Split-Path $InstallPs1)
-    try {
-        powershell -NoProfile -ExecutionPolicy ByPass -c "Get-Content -Raw install.ps1 | iex"
-    } finally {
-        Pop-Location
-    }
-}
 
 $env:Path = "$UvBin;$env:Path"
 
