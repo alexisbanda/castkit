@@ -15,6 +15,7 @@ import os
 import subprocess
 import sys
 
+from castkit import __version__
 from castkit.blender import (
     BlenderNotFoundError,
     localizar_blender,
@@ -33,6 +34,8 @@ from castkit.config import (
     version_blender_fijada,
 )
 from castkit.diseno import carpeta_disenos, origen_carpeta_disenos
+
+_RELEASES = "https://github.com/alexisbanda/castkit/releases"
 
 _TIMEOUT_VERSION_BLENDER_S = 10.0
 
@@ -85,12 +88,14 @@ def _comprobar_extra_profundidad() -> None:
     if instalado:
         print("Extra «profundidad»: instalado (torch y transformers disponibles).")
     else:
+        rueda = f"{_RELEASES}/download/v{__version__}/castkit-{__version__}-py3-none-any.whl"
         print(
             "Extra «profundidad»: no instalado (opcional; solo lo necesita "
-            "`castkit generar --proveedor profundidad`). Para instalarlo: "
-            '`uv tool install --reinstall "castkit[profundidad] @ '
-            'git+https://github.com/alexisbanda/castkit.git"`, o `uv sync --extra profundidad` '
-            "en un clon."
+            "`castkit generar --proveedor profundidad`). Para instalarlo en Windows, pega en "
+            f"PowerShell: `irm {_RELEASES}/latest/download/install.ps1 | iex`. En Linux o macOS: "
+            f'`uv tool install --force "castkit[profundidad] @ {rueda}" '
+            "--index pytorch-cpu=https://download.pytorch.org/whl/cpu`. En un clon: "
+            "`uv sync --extra profundidad`."
         )
 
 

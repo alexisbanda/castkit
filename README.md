@@ -220,6 +220,7 @@ anterior):
 1. Sube `version` en [`pyproject.toml`](pyproject.toml) y `__version__` en
    `src/castkit/__init__.py` al mismo número (por ejemplo, `0.2.0`), y corre `uv lock` para que
    `uv.lock` quede con esa misma versión (la CI usa `uv sync --locked`, y sin este paso falla).
+   Cambia también la versión en los comandos de [«Linux / macOS»](#linux--macos) (un test lo exige).
 2. Haz commit de esos cambios (incluido `uv.lock`) y súbelo a `main`.
 3. Etiqueta ese commit y empuja la etiqueta:
 

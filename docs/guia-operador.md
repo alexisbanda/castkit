@@ -11,81 +11,68 @@ encontrar lo que necesitas para sacar un pedido adelante.
 
 ## 1. Instalar y comprobar
 
-Antes de tu primer pedido hay que instalar cuatro cosas: Git, [uv](https://docs.astral.sh/uv/),
-Blender y castkit. Son los mismos pasos la primera vez y cada vez que te toque dejar listo un
-equipo nuevo.
+Antes de tu primer pedido hay que instalar dos cosas: Blender y castkit. No necesitas Git ni una
+cuenta de GitHub. Son los mismos pasos la primera vez y cada vez que te toque dejar listo un equipo
+nuevo.
 
-**Nota:** esta forma de instalar es provisional, mientras se decide cómo se va a distribuir
-castkit más adelante ([#80](https://github.com/alexisbanda/castkit/issues/80)). Por ahora se
-instala directamente desde el repositorio de GitHub con Git, y tu cuenta de GitHub tiene que estar
-añadida como colaboradora del repositorio (lo hace quien administra castkit en el taller).
+### En Windows
 
-**a) Abre la terminal.** En Windows, abre **PowerShell** desde el menú Inicio (escribe
-«PowerShell» y pulsa Intro); no uses el «Símbolo del sistema» (`cmd`): los comandos de esta
-guía están pensados para PowerShell. En Linux o macOS, abre tu terminal de siempre.
+**a) Instala Blender.** castkit usa Blender por debajo para varios pasos del pipeline (el punto
+de control 1, la limpieza de respaldo, etc.) y necesita la versión fijada en el proyecto,
+**5.2.2 LTS**: descárgala desde [blender.org/download](https://www.blender.org/download/). Elige
+el instalador `.msi` y acepta la carpeta que propone: castkit lo encuentra solo ahí, sin configurar
+nada más.
 
-**b) Instala Git (si no lo tienes) y uv.**
+**b) Abre PowerShell** desde el menú Inicio (escribe «PowerShell» y pulsa Intro). No hace falta
+abrirlo como administrador. No uses el «Símbolo del sistema» (`cmd`): los comandos de esta guía
+están pensados para PowerShell.
 
-En Windows, desde PowerShell:
+**c) Pega esta línea y pulsa Intro:**
 
 ```powershell
-winget install --id Git.Git -e
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+irm https://github.com/alexisbanda/castkit/releases/latest/download/install.ps1 | iex
 ```
 
-Si `winget` pregunta si aceptas los términos, escribe `Y` y pulsa Intro. Si tu equipo no tiene
-`winget`, instala Git con el instalador de [git-scm.com](https://git-scm.com/download/win).
+Instala todo lo que falte, incluido el proveedor `profundidad` que usa el pedido del toro (media
+figura desde una foto o dibujo frontal), y al terminar ejecuta `castkit comprobar` por ti. Puede
+tardar varios minutos. Si PowerShell avisa de que los scripts están deshabilitados, pega esto en
+su lugar:
 
-En Linux o macOS:
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://github.com/alexisbanda/castkit/releases/latest/download/install.ps1 | iex"
+```
+
+Para actualizar más adelante, vuelve a pegar la misma línea.
+
+### En Linux o macOS
+
+**a) Instala uv:**
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-(La mayoría de Linux y macOS ya traen Git instalado; si el comando `git` no funciona, instálalo
-con el gestor de paquetes de tu sistema, por ejemplo `apt install git`.)
+**b) Cierra la terminal y abre una nueva.** La terminal donde instalaste uv todavía no conoce el
+comando.
 
-**c) Cierra la terminal y abre una nueva.** El instalador de uv deja todo listo, pero la terminal
-donde lo instalaste no se entera: cierra esa ventana y abre una terminal nueva (en Windows, de
-nuevo PowerShell) antes de seguir.
+**c) Instala Blender 5.2.2 LTS** desde [blender.org/download](https://www.blender.org/download/),
+donde prefieras (en Linux se descomprime; en macOS se arrastra el `.dmg` a Aplicaciones). Deja el
+ejecutable `blender` accesible en el `PATH`, o define la variable de entorno `BLENDER_BIN` con la
+ruta completa (ver [«Definir una variable de entorno»](#definir-una-variable-de-entorno), más
+abajo).
 
-**d) Instala Blender.** castkit usa Blender por debajo para varios pasos del pipeline (el punto
-de control 1, la limpieza de respaldo, etc.) y necesita la versión fijada en el proyecto,
-**5.2.2 LTS**: descárgala desde [blender.org/download](https://www.blender.org/download/).
+**d) Instala castkit** con el comando de la versión actual que está en el README, sección
+[«Linux / macOS»](../README.md#linux--macos). Ahí también está cómo actualizar.
 
-En **Windows**, descarga el instalador `.msi` y acepta la carpeta que propone: castkit lo
-encuentra solo ahí, sin configurar nada más.
-
-En **Linux/macOS**, instala Blender donde prefieras (en Linux se descomprime; en macOS se arrastra
-el `.dmg` a Aplicaciones) y deja el ejecutable `blender` accesible en el `PATH`, o define la variable de entorno `BLENDER_BIN` con la ruta completa (ver
-[«Definir una variable de entorno»](#definir-una-variable-de-entorno), más abajo).
-
-Más adelante, `castkit comprobar` (paso **g**) confirma que Blender quedó encontrado y con qué
-versión.
-
-**e) Instala castkit:**
-
-```bash
-uv tool install "castkit[profundidad] @ git+https://github.com/alexisbanda/castkit.git"
-```
-
-El pedido del toro usa el proveedor `profundidad` (media figura desde una foto o dibujo frontal);
-si tu taller no trabaja con medias figuras, puedes instalar sin `[profundidad]`. La primera vez
-puede abrirse el navegador para que inicies sesión en GitHub —es el gestor de credenciales de Git,
-que comprueba que tienes acceso al repositorio—; inicia sesión con tu cuenta y sigue. Para
-actualizar más adelante: `uv tool upgrade castkit`.
-
-**f) Cierra la terminal y abre otra nueva.** Si ves un aviso parecido a «...\.local\bin is not
-on your PATH»: es normal, solo dice que esta terminal todavía no conoce el comando `castkit`.
-Cierra la ventana y abre una terminal nueva; ahí el comando ya funciona.
-
-**g) Comprueba que todo quedó en orden:**
+**e) Cierra la terminal y abre otra nueva,** y ejecuta:
 
 ```bash
 castkit comprobar
 ```
 
-Debería verse algo así (las rutas de tu equipo serán distintas):
+### Qué debería verse
+
+Al terminar, `castkit comprobar` muestra algo así (las rutas de tu equipo serán distintas):
 
 ![Salida de «castkit comprobar»: Blender encontrado y su versión, el extra «profundidad» instalado, la configuración de fabricación válida, la carpeta de diseños y si la clave de Tripo está definida](img/comprobar.png)
 
@@ -331,11 +318,9 @@ El proveedor profundidad necesita el extra opcional: uv sync --extra profundidad
 ```
 
 **Qué hacer**: si instalaste castkit como herramienta (lo habitual en el taller), reinstálalo
-con el extra:
-
-```bash
-uv tool install --reinstall "castkit[profundidad] @ git+https://github.com/alexisbanda/castkit.git"
-```
+con el extra. En Windows, vuelve a pegar la línea de instalación del
+[paso 1](#1-instalar-y-comprobar), que ya lo incluye. En Linux o macOS, repite el comando de
+instalación con `--force`, como indica el README en [«Linux / macOS»](../README.md#linux--macos).
 
 (El mensaje menciona `uv sync --extra profundidad`, que es la forma equivalente para quien
 trabaja desde un clon del repositorio en modo desarrollo.)

@@ -9,7 +9,7 @@
 - Python 3.12, con entorno y dependencias gestionados por uv (`pyproject.toml` + `uv.lock`).
 - manifold3d para la generación geométrica de la matriz final (modo `figura` o modo `cubeta` multicavidad con borde exterior).
 - trimesh, manifold3d y fast-simplification para el procesamiento, limpieza y validación de mallas.
-- Blender LTS en modo headless (scripts `bpy`), **obligatorio para los puntos de control**: renderiza las 4 vistas del punto de control 1 con el motor `CYCLES` en CPU y también se usa como remallado de respaldo en `castkit limpieza`, invocado como subproceso (`blender --background --python …`); el ejecutable se toma de `BLENDER_BIN` o del PATH. No existe ningún motor de respaldo para los renders: si Blender falla o no está disponible, el punto de control falla con un error explícito.
+- Blender LTS en modo headless (scripts `bpy`), **obligatorio para los puntos de control**: renderiza las 4 vistas del punto de control 1 con el motor `CYCLES` en CPU y también se usa como remallado de respaldo en `castkit limpieza`, invocado como subproceso (`blender --background --python …`); el ejecutable se toma de `BLENDER_BIN`, del PATH o, en Windows, de la carpeta de instalación del `.msi` en Program Files. No existe ningún motor de respaldo para los renders: si Blender falla o no está disponible, el punto de control falla con un error explícito.
 - Arquitectura de **proveedor enchufable** (protocolo/interfaz en Python configurable en `config/fabricacion.toml`) para la generación de mallas 3D a partir de imágenes, documentos (`.pdf`, `.ai`) o prompts de texto.
 - scikit-image (BSD-3) para los proveedores locales `relieve` (bajorrelieve por capas de color) y `profundidad` (media figura): trazan los contornos con `skimage.measure.find_contours`.
 - torch y transformers (extra opcional `profundidad`, no instalado por defecto) para el proveedor local `profundidad`: mapa de profundidad en CPU con Depth Anything V2 Small (Apache-2.0; las variantes Base/Large son CC-BY-NC y se rechazan).
@@ -51,6 +51,7 @@ Las reglas por material, la selección del proveedor de generación 3D y los par
 - Desarrollo y uso local en los equipos del estudio: Linux, macOS y Windows.
 - CI en GitHub Actions con matriz de los tres sistemas operativos (Blender solo en Linux).
 - No hay despliegue a servidores: la herramienta se instala en los equipos del estudio.
+- Distribución: al empujar una etiqueta `v*`, `release.yml` publica una release de GitHub con la rueda (`.whl`) e `install.ps1`. El repositorio es público, así que instalar no requiere Git ni cuenta de GitHub: en Windows, una línea de PowerShell; en Linux y macOS, `uv tool install` desde la rueda (ver README).
 
 ## Decisiones pendientes
 
