@@ -6,12 +6,49 @@ on:
   workflow_dispatch:
 
 jobs:
+  construir:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (para leer sim/windows/ref.txt)
+        uses: actions/checkout@v4
+
+      - name: Leer la rama de castkit a construir
+        id: ref
+        run: echo "ref=$(cat sim/windows/ref.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout de esa rama
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.ref.outputs.ref }}
+          clean: true
+
+      - name: Instalar uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Construir la rueda
+        run: uv build
+
+      - name: Subir rueda e install.ps1
+        uses: actions/upload-artifact@v4
+        with:
+          name: castkit-para-sim
+          path: |
+            dist/*.whl
+            install.ps1
+
   operador:
+    needs: construir
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Descargar rueda e install.ps1
+        uses: actions/download-artifact@v4
+        with:
+          name: castkit-para-sim
+          path: paquete
 
       - name: Instalar Blender con el instalador .msi (como un usuario)
         shell: pwsh
@@ -24,11 +61,27 @@ jobs:
           Get-ChildItem 'C:\Program Files\Blender Foundation' -Recurse -Filter blender.exe | Select-Object FullName
           "¿blender en PATH?: $([bool](Get-Command blender -ErrorAction SilentlyContinue))"
 
+      - name: Quitar Git y uv del PATH (Windows limpio, sin gestores instalados)
+        shell: pwsh
+        run: |
+          $partes = $env:Path -split ';' | Where-Object {
+              $_ -notmatch '(?i)\\git(\\|$)' -and
+              $_ -notmatch '(?i)\.local\\bin' -and
+              $_ -notmatch '(?i)\\uv(\\|$)' -and
+              $_ -notmatch '(?i)\.cargo\\bin'
+          }
+          $nuevo = $partes -join ';'
+          $env:Path = $nuevo
+          "PATH=$nuevo" | Add-Content -Encoding utf8 $env:GITHUB_ENV
+          "git en PATH: $([bool](Get-Command git -ErrorAction SilentlyContinue))"
+          "uv en PATH: $([bool](Get-Command uv -ErrorAction SilentlyContinue))"
+
       - name: Simular al operador
         shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }}
           SIM_OUT: ${{ runner.temp }}\sim
+          SIM_INSTALL: ${{ github.workspace }}\paquete\install.ps1
+          SIM_RUEDA: ${{ github.workspace }}\paquete\dist
         run: ./sim/windows/simular.ps1
 
       - name: Subir resultados

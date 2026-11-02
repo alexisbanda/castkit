@@ -27,13 +27,12 @@ function Etapa([string]$nombre, [scriptblock]$bloque) {
     "| $script:n | $nombre | $codigo | $([int]$t.Elapsed.TotalSeconds) |" | Add-Content -Encoding utf8 $Resumen
 }
 
-# Credencial vía git (no en la URL) para que no aparezca en los logs subidos.
-git config --global url."https://x-access-token:$($env:GH_TOKEN)@github.com/".insteadOf "https://github.com/"
-# Rama o commit de castkit a instalar: sim/windows/ref.txt (por defecto main).
-$RefArchivo = Join-Path $PSScriptRoot 'ref.txt'
-$Ref = if (Test-Path $RefArchivo) { (Get-Content $RefArchivo -Raw).Trim() } else { 'main' }
-"Instalando castkit desde: $Ref" | Set-Content -Encoding utf8 (Join-Path $Out "00-ref.log")
-$Repo = "git+https://github.com/$($env:GITHUB_REPOSITORY).git@$Ref"
+# install.ps1 y la rueda (.whl) de castkit a probar: los deja el job "construir"
+# (ubuntu, sin Windows) en el artifact descargado antes de este paso, ver
+# sim-windows.yml (#80: Windows limpio, sin Git ni cuenta de GitHub).
+$InstallPs1 = $env:SIM_INSTALL
+$RuedaWhl = (Get-ChildItem $env:SIM_RUEDA -Filter '*.whl' | Select-Object -First 1).FullName
+"install.ps1: $InstallPs1`nrueda: $RuedaWhl" | Set-Content -Encoding utf8 (Join-Path $Out '00-paquete.log')
 
 Etapa 'entorno' {
     [Environment]::OSVersion.VersionString
@@ -49,25 +48,42 @@ Etapa 'instalar-uv' {
 }
 $UvBin = Join-Path $HOME '.local\bin'
 
-# 2. El comando de la guía (comillas dobles, git+https) pegado en cmd.exe: debe funcionar.
-Etapa 'guia-en-cmd-comillas-dobles' {
-    cmd /c "`"$UvBin\uv.exe`" tool install `"castkit @ $Repo`""
+# 2. install.ps1 -Rueda <rueda>, como archivo: la instalación real (#80).
+Etapa 'instalar-con-rueda' {
+    powershell -NoProfile -ExecutionPolicy ByPass -File $InstallPs1 -Rueda $RuedaWhl
 }
 
-# 3. Instalación real, en PowerShell, con el extra profundidad (como en la guía).
-Etapa 'uv-tool-install-profundidad' {
-    & "$UvBin\uv.exe" tool install --force "castkit[profundidad] @ $Repo"
+# 3. Repetirlo (como una actualización): debe volver a funcionar.
+Etapa 'reinstalar-actualizar' {
+    powershell -NoProfile -ExecutionPolicy ByPass -File $InstallPs1 -Rueda $RuedaWhl
 }
 
-# 4. ¿Una terminal nueva encuentra `castkit`? (PATH leído del registro, como al abrir otra ventana)
+# 4. -Rueda con una ruta que no existe: debe fallar con un mensaje en español.
+Etapa 'rueda-inexistente' {
+    powershell -NoProfile -ExecutionPolicy ByPass -File $InstallPs1 -Rueda 'C:\no-existe-esta-rueda-de-prueba.whl'
+}
+
+# 5. Bajo iex real, sin argumentos: todavía no hay ninguna release publicada de
+# castkit, así que la API de GitHub debe responder 404 y el mensaje debe decirlo.
+Etapa 'iex-sin-argumentos-sin-release' {
+    Push-Location (Split-Path $InstallPs1)
+    try {
+        powershell -NoProfile -ExecutionPolicy ByPass -c "Get-Content -Raw install.ps1 | iex"
+    } finally {
+        Pop-Location
+    }
+}
+
+$env:Path = "$UvBin;$env:Path"
+
+# 6. ¿Una terminal nueva encuentra `castkit`? (PATH leído del registro, como al abrir otra ventana)
 Etapa 'castkit-en-terminal-nueva' {
     $p = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
     "PATH de usuario: $([Environment]::GetEnvironmentVariable('Path', 'User'))"
     pwsh -NoProfile -Command "`$env:Path = '$p'; (Get-Command castkit -ErrorAction Stop).Source; castkit --help"
 }
-$env:Path = "$UvBin;$env:Path"
 
-# 5. Blender instalado con el .msi pero sin BLENDER_BIN (lo normal en Windows).
+# 7. Blender instalado con el .msi pero sin BLENDER_BIN (lo normal en Windows).
 Etapa 'comprobar-sin-BLENDER_BIN' {
     Remove-Item Env:BLENDER_BIN -ErrorAction SilentlyContinue
     castkit comprobar
@@ -95,7 +111,7 @@ $BriefConComillas = "`"$Brief`""
 $Comun = @('--modo', 'cubeta', '--material', 'silicona', '--cantidad', '10',
     '--fecha', '2026-12-15', '--licencia', 'propio', '--origen', 'dibujo del cliente')
 
-# 5b. Sin CASTKIT_DISENOS (#83): los diseños van a Documentos\castkit, se lance desde donde se lance.
+# 7b. Sin CASTKIT_DISENOS (#83): los diseños van a Documentos\castkit, se lance desde donde se lance.
 $DisenosGuardada = $env:CASTKIT_DISENOS
 Remove-Item Env:CASTKIT_DISENOS -ErrorAction SilentlyContinue
 $DocsDefecto = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'castkit'
@@ -118,25 +134,25 @@ Etapa 'defecto-diseno-en-Documentos-castkit' {
 Pop-Location
 $env:CASTKIT_DISENOS = $DisenosGuardada
 
-# 6. Diseño plano (relieve).
+# 8. Diseño plano (relieve).
 Etapa 'alta-plano-relieve' {
     castkit alta logo-pena --brief $BriefConComillas --tipo-molde abierto --largo-mm 60 --grosor-mm 5 --cavidades 2 --proveedor relieve @Comun
 }
 Etapa 'flujo-plano-relieve' { castkit flujo logo-pena --aprobar-control1 }
 
-# 7. Media figura (profundidad, torch en CPU).
+# 9. Media figura (profundidad, torch en CPU).
 Etapa 'alta-media-profundidad' {
     castkit alta media-pena --brief $BriefConComillas --tipo-molde abierto --largo-mm 80 --grosor-mm 15 --cavidades 1 --proveedor profundidad @Comun
 }
 Etapa 'flujo-media-profundidad' { castkit flujo media-pena --aprobar-control1 }
 
-# 8. Figura completa (imagen-3d, local).
+# 10. Figura completa (imagen-3d, local).
 Etapa 'alta-completa-imagen3d' {
     castkit alta figura-pena --brief $BriefConComillas --tipo-molde completo --alto-mm 70 --cavidades 1 --proveedor imagen-3d @Comun
 }
 Etapa 'flujo-completa-imagen3d' { castkit flujo figura-pena --aprobar-control1 }
 
-# 9. Sin argumentos y sin terminal: ¿qué ve quien lanza `castkit alta` desde un script/acceso directo?
+# 11. Sin argumentos y sin terminal: ¿qué ve quien lanza `castkit alta` desde un script/acceso directo?
 Etapa 'alta-sin-argumentos-sin-tty' { '' | castkit alta }
 
 Etapa 'arbol-de-disenos' {
@@ -144,7 +160,7 @@ Etapa 'arbol-de-disenos' {
 }
 Copy-Item -Recurse $env:CASTKIT_DISENOS (Join-Path $Out 'disenos')
 
-# 10. Tests marcados `blender` desde el clon, que la CI de Windows siempre salta.
+# 12. Tests marcados `blender` desde el clon, que la CI de Windows siempre salta.
 Etapa 'pytest-blender' {
     Set-Location $env:GITHUB_WORKSPACE
     & "$UvBin\uv.exe" sync --locked
