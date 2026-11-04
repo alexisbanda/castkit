@@ -1207,6 +1207,7 @@ def _ejecutar_alta_guiada(args: argparse.Namespace) -> int:
             modo_matriz=modo,
             imagen=imagen,
             vista=vista,
+            vista_area_min_pct=_area_min_pct_vistas,
         )
         ruta = crear_diseno(datos, destino=destino)
     except AltaError as exc:

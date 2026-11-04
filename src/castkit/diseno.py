@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 
-from castkit.imagen_brief import ImagenBriefError, recortar_vista
+from castkit.imagen_brief import AREA_MIN_PCT_DEFECTO, ImagenBriefError, recortar_vista
 
 MATERIALES = ("porcelana-fria", "silicona", "cera")
 LICENCIAS = ("propio", "comercial")
@@ -242,6 +242,7 @@ class DatosAlta:
     modo_matriz: str | None = None
     imagen: str | None = None
     vista: str | None = None
+    vista_area_min_pct: float = AREA_MIN_PCT_DEFECTO
 
     def __post_init__(self) -> None:
         validar_nombre(self.nombre)
@@ -384,7 +385,12 @@ def crear_diseno(datos: DatosAlta, destino: Path | None = None) -> Path:
                 )
             origen_imagen = Path(datos.brief) / datos.imagen
             try:
-                ruta_recorte = recortar_vista(origen_imagen, datos.vista, tmp_dir / "brief")
+                ruta_recorte = recortar_vista(
+                    origen_imagen,
+                    datos.vista,
+                    tmp_dir / "brief",
+                    area_min_pct=datos.vista_area_min_pct,
+                )
             except ImagenBriefError as exc:
                 raise AltaError(str(exc)) from exc
             imagen_version = ruta_recorte.name

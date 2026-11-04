@@ -826,9 +826,11 @@ def test_fondo_no_uniforme_avisa_y_sigue_sin_preguntar_vistas(
     salida = capsys.readouterr().out
     assert "fondo liso o transparente" in salida
     assert "Vista:" not in salida
+    assert "vistas" not in salida.lower()
     # La siguiente pregunta tras el brief es «qué imprime castkit» (el modo),
-    # no una de vistas: no se preguntó nada de vistas.
+    # no una de vistas: no se preguntó nada de vistas en ninguna pregunta.
     assert "imprime" in preguntas[2]
+    assert not any("vista" in p.lower() for p in preguntas)
 
     contenido = json.loads((destino / "toro" / "diseno.json").read_text(encoding="utf-8"))
     assert contenido["versiones"]["v1"]["imagen"] == "fondo-malo.png"
@@ -969,3 +971,257 @@ def test_opciones_tipo_de_pieza_describen_lo_que_se_ve_sin_citar_medalla(
     assert "colores planos" in prompt_tipo_pieza
     assert "volumen" in prompt_tipo_pieza
     assert "figura completa" in prompt_tipo_pieza
+
+
+# ---------------------------------------------------------------------------
+# Ticket #93 (ronda de correcciones): el umbral de área de las vistas se usa
+# de principio a fin, no solo al analizar (`vista_area_min_pct` de
+# `[generacion]`, ver `_ejecutar_alta_guiada` y `DatosAlta.vista_area_min_pct`
+# en `diseno.py`).
+# ---------------------------------------------------------------------------
+
+
+def _escribir_toml_area_min_pct(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pct: float
+) -> None:
+    """Escribe un `fabricacion.toml` propio con `vista_area_min_pct = pct` en
+    `[generacion]` y lo fija con `CASTKIT_FABRICACION_TOML` (ver
+    `tests/test_generacion.py::_escribir_toml_tripo` para el mismo patrón).
+    """
+    toml_custom = tmp_path / "fabricacion.toml"
+    toml_custom.write_text(
+        f'[generacion]\nproveedor = "no-usado"\ncomando = ""\nvista_area_min_pct = {pct}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CASTKIT_FABRICACION_TOML", str(toml_custom))
+
+
+def test_umbral_de_vistas_configurado_se_usa_tambien_al_recortar(
+    destino: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Con `vista_area_min_pct` bajado por configuración, una figura pequeña
+    (menos del 10% del área, el defecto fijo de `imagen_brief.py`) cuenta como
+    una 3ª vista, y el recorte final usa ESE umbral, no el defecto: si
+    `crear_diseno` no recibiera el umbral configurado (el bug de esta ronda),
+    `recortar_vista` recalcularía con 10% y solo vería 2 vistas, por lo que
+    "derecha" recortaría la 2ª figura (una de las grandes) en vez de la
+    pequeña elegida en la entrevista.
+    """
+    import numpy as np
+
+    _escribir_toml_area_min_pct(tmp_path, monkeypatch, pct=2.5)
+
+    carpeta_brief = tmp_path / "brief-escala"
+    carpeta_brief.mkdir()
+    arr = np.full((80, 200, 3), 255, dtype=np.uint8)
+    _pintar_cuadro(arr, 10, 10, 50, 50)  # grande, 40x40 = 1600 px, centro x=30
+    _pintar_cuadro(arr, 10, 80, 50, 120)  # grande, 40x40 = 1600 px, centro x=100
+    _pintar_cuadro(arr, 30, 150, 35, 170)  # pequeña, 20x5 = 100 px, centro x=160
+    Image.fromarray(arr, mode="RGB").save(carpeta_brief / "figuras-escala.png")
+
+    _activar_stdin_interactivo(monkeypatch)
+    respuestas = [
+        "toro",
+        str(carpeta_brief),
+        "3",  # ¿cuál vista?: 1) izquierda 2) centro 3) derecha -> la pequeña
+        "",  # modo
+        "",  # tipo de molde (abierto, por --proveedor explícito)
+        "",
+        "",  # largo, grosor
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",  # material, cavidades, cantidad, fecha, licencia, origen
+        "",  # resumen: crear
+    ]
+    preguntas = _simular_respuestas(monkeypatch, respuestas)
+
+    codigo = main(["alta", "--proveedor", "fake-no-usado"])
+    assert codigo == 0
+
+    assert "vista" in preguntas[2].lower()
+    salida = capsys.readouterr().out
+    assert "Encontré 3 vistas" in salida
+    assert "Vista: derecha" in salida
+
+    ruta_diseno = destino / "toro"
+    contenido = json.loads((ruta_diseno / "diseno.json").read_text(encoding="utf-8"))
+    imagen_guardada = contenido["versiones"]["v1"]["imagen"]
+    assert imagen_guardada == "figuras-escala-vista-derecha.png"
+
+    # El recorte de la vista pequeña conserva sus proporciones (20x5, con
+    # margen de 10 px por lado y recortado a los bordes de la figura
+    # pequeña): 40x25 px. Sin la corrección, `recortar_vista` recalcula con
+    # el umbral por defecto (10%), que excluye la figura pequeña: solo
+    # quedan 2 vistas y "derecha" pasa a ser la 2ª figura grande (60x60 px
+    # con margen), no la pequeña elegida.
+    with Image.open(ruta_diseno / "brief" / imagen_guardada) as recorte:
+        assert recorte.size == (40, 25)
+
+
+# ---------------------------------------------------------------------------
+# Ticket #93 (ronda de correcciones): con 2+ vistas, el valor por defecto de
+# la pregunta de tipo de pieza (Intro = "media") sigue dejando tipo_molde
+# "abierto" y proveedor "profundidad" en diseno.json, igual que sin vistas.
+# ---------------------------------------------------------------------------
+
+
+def test_tres_vistas_con_tipo_de_pieza_por_defecto_deja_abierto_y_profundidad(
+    destino: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import numpy as np
+
+    carpeta_brief = tmp_path / "brief-tres-defecto"
+    carpeta_brief.mkdir()
+    arr = np.full((60, 140, 3), 255, dtype=np.uint8)
+    _pintar_cuadro(arr, 10, 10, 20, 20)
+    _pintar_cuadro(arr, 10, 55, 20, 65)
+    _pintar_cuadro(arr, 10, 100, 20, 110)
+    Image.fromarray(arr, mode="RGB").save(carpeta_brief / "figuras.png")
+
+    _activar_stdin_interactivo(monkeypatch)
+    respuestas = [
+        "toro",
+        str(carpeta_brief),
+        "2",  # ¿cuál vista?: 1) izquierda 2) centro 3) derecha -> centro
+        "",  # modo
+        "",  # tipo de pieza: Intro = "media" (sin --proveedor, se pregunta)
+        "",  # largo
+        "",  # grosor
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",  # material, cavidades, cantidad, fecha, licencia, origen
+        "",  # resumen: crear
+    ]
+    _simular_respuestas(monkeypatch, respuestas)
+
+    codigo = main(["alta"])
+    assert codigo == 0
+
+    contenido = json.loads((destino / "toro" / "diseno.json").read_text(encoding="utf-8"))
+    v1 = contenido["versiones"]["v1"]
+    assert v1["tipo_molde"] == "abierto"
+    assert v1["proveedor"] == "profundidad"
+    assert v1["imagen"] == "figuras-vista-centro.png"
+
+
+# ---------------------------------------------------------------------------
+# Ticket #93 (ronda de correcciones): `flujo` también usa la imagen elegida
+# al dar de alta (no solo `generar`, ver
+# `test_dos_imagenes_legibles_pregunta_cual_y_la_usan_generar`).
+# ---------------------------------------------------------------------------
+
+
+def test_flujo_usa_la_imagen_elegida(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, blender_falso: object
+) -> None:
+    carpeta_brief = tmp_path / "brief-flujo-imagen"
+    carpeta_brief.mkdir()
+    Image.new("RGB", (20, 20), (255, 255, 255)).save(carpeta_brief / "a-imagen.png")
+    Image.new("RGB", (20, 20), (255, 255, 255)).save(carpeta_brief / "z-imagen.png")
+
+    destino = tmp_path / "disenos"
+    destino.mkdir()
+    monkeypatch.setenv("CASTKIT_DISENOS", str(destino))
+
+    fake = _ProveedorCapturaImagen()
+    registrar_proveedor("fake-flujo-imagen", fake)
+    try:
+        datos = DatosAlta(
+            nombre="guagua-pan",
+            brief=carpeta_brief,
+            material="porcelana-fria",
+            alto_mm=40.0,
+            cavidades=4,
+            cantidad=20,
+            fecha=date(2026, 11, 1),
+            licencia="propio",
+            origen="prueba",
+            proveedor="fake-flujo-imagen",
+            modo_matriz="figura",
+            imagen="z-imagen.png",
+        )
+        crear_diseno(datos, destino=destino)
+
+        codigo = main(["flujo", "guagua-pan", "--aprobar-control1"])
+        assert codigo == 0
+        # «z-imagen.png» se usó aunque «a-imagen.png» sea la primera por orden
+        # alfabético: `flujo` respeta la imagen elegida al dar de alta, igual
+        # que `generar`.
+        assert fake.imagen_usada == "z-imagen.png"
+    finally:
+        desregistrar_proveedor("fake-flujo-imagen")
+
+
+# ---------------------------------------------------------------------------
+# Ticket #93 (ronda de correcciones): `castkit alta <nombre> ...` (con nombre
+# en el comando, sin entrevista) nunca mira las imágenes del brief, aunque
+# haya varias legibles o una con varias vistas: `imagen` queda `None` y se
+# conservan `--proveedor`/`--tipo-molde` tal cual se pasaron.
+# ---------------------------------------------------------------------------
+
+
+def test_alta_con_nombre_en_el_comando_no_analiza_imagenes(destino: Path, tmp_path: Path) -> None:
+    import numpy as np
+
+    carpeta_dos_imagenes = tmp_path / "brief-dos-imagenes"
+    carpeta_dos_imagenes.mkdir()
+    Image.new("RGB", (20, 20), (255, 255, 255)).save(carpeta_dos_imagenes / "a-imagen.png")
+    Image.new("RGB", (20, 20), (255, 255, 255)).save(carpeta_dos_imagenes / "z-imagen.png")
+
+    carpeta_tres_vistas = tmp_path / "brief-tres-vistas"
+    carpeta_tres_vistas.mkdir()
+    arr = np.full((60, 140, 3), 255, dtype=np.uint8)
+    _pintar_cuadro(arr, 10, 10, 20, 20)
+    _pintar_cuadro(arr, 10, 55, 20, 65)
+    _pintar_cuadro(arr, 10, 100, 20, 110)
+    Image.fromarray(arr, mode="RGB").save(carpeta_tres_vistas / "figuras.png")
+
+    casos = [
+        ("sin-entrevista-dos-imagenes", carpeta_dos_imagenes),
+        ("sin-entrevista-tres-vistas", carpeta_tres_vistas),
+    ]
+    for nombre, carpeta_brief in casos:
+        codigo = main(
+            [
+                "alta",
+                nombre,
+                "--brief",
+                str(carpeta_brief),
+                "--material",
+                "porcelana-fria",
+                "--tipo-molde",
+                "abierto",
+                "--largo-mm",
+                "80",
+                "--cavidades",
+                "4",
+                "--cantidad",
+                "10",
+                "--fecha",
+                "2026-11-01",
+                "--licencia",
+                "propio",
+                "--origen",
+                "prueba",
+                "--proveedor",
+                "relieve",
+            ]
+        )
+        assert codigo == 0
+
+        contenido = json.loads((destino / nombre / "diseno.json").read_text(encoding="utf-8"))
+        v1 = contenido["versiones"]["v1"]
+        assert v1["imagen"] is None
+        assert v1["proveedor"] == "relieve"
+        assert v1["tipo_molde"] == "abierto"
