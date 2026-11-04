@@ -1023,8 +1023,8 @@ def generar_malla(
                         f'La imagen "{insumos.imagenes[0].name}" tiene '
                         f"{len(analisis_vistas.vistas)} vistas (figuras separadas); el "
                         'proveedor "relieve" solo admite una. Deja una sola figura en la '
-                        "imagen, o genera con --proveedor profundidad para construir una "
-                        "media figura a partir de varias vistas."
+                        "imagen, o genera con --proveedor profundidad, que modela solo la "
+                        "vista más grande."
                     )
                 mayor = vista_mayor(analisis_vistas.vistas)
                 if mayor is not None and informar is not None:
