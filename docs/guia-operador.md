@@ -143,6 +143,11 @@ vas a usar. Para que el resultado salga bien:
 - **Vista frontal o de perfil**, según la pieza. Para una media figura (como el toro) usa una
   vista frontal; el proveedor `profundidad` calcula el relieve a partir de esa única vista.
 
+Al ejecutar `castkit generar` (o `castkit flujo` completo), castkit te avisa de lo mismo: con
+`profundidad` te dice cuántas vistas encontró y cuál va a modelar (la más grande); con `relieve`,
+que solo admite una figura por imagen, se detiene sin generar nada si encuentra dos o más, para
+que dejes una sola antes de volver a intentarlo.
+
 El pedido del toro llegó como una foto de papel con fondo degradado (`toro-original.png`, con
 fondo). Antes de usarla hubo que quitarle el fondo y dejarlo transparente
 (`toro-dibujo.png`):

@@ -402,6 +402,12 @@ Con la imagen elegida:
   (con un margen y el resto pintado del color de fondo, o transparente) y ese recorte, no la
   imagen original, es el que usan los proveedores al generar la malla.
 
+`castkit generar` y `castkit flujo` repiten este aviso de vistas al generar la malla, no solo en
+esta entrevista (ticket [#94](https://github.com/alexisbanda/castkit/issues/94)): con el
+proveedor `profundidad` informan cuántas vistas encontraron en la imagen y cuál van a modelar (la
+de mayor área); con `relieve`, que solo admite una figura, dos o más vistas detienen la
+generación sin escribir nada hasta que quede una sola (o cambies a `--proveedor profundidad`).
+
 El resumen final muestra la imagen elegida (y la vista, si hubo que elegirla); si cambias la línea
 de la carpeta del brief, se repiten las preguntas de imagen y vista. `castkit alta <nombre> ...`
 sin entrevista (uso clásico, abajo) no pregunta nada de esto y sigue usando la primera imagen por
