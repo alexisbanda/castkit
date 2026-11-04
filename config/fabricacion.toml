@@ -44,6 +44,12 @@ tripo_modelo = "v2.5-20250123"
 # tarea termine antes de fallar.
 tripo_espera_max_s = 600
 
+# Porcentaje mínimo (del área total de la figura, tras rellenar huecos) que debe
+# tener una componente separada de una imagen del brief para contar como una vista
+# propia en la entrevista guiada de "castkit alta" (#93); las manchas menores no
+# cuentan. Opcional: si falta (copias de este archivo de antes del #93), se usa 10.
+vista_area_min_pct = 10
+
 [relieve]
 # Proveedor local "relieve" (#43): bajorrelieve por capas de color para
 # diseños planos (logos, escudos, medallas, apliques). Es un molde abierto

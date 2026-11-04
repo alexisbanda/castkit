@@ -47,13 +47,19 @@ Límites actuales: los proveedores locales esperan un fondo liso o transparente
 
 ### Qué proveedor elegir
 
-| Qué quieres fabricar | Proveedor |
-| --- | --- |
-| Diseño plano de colores (logo, escudo, medalla) | `relieve` |
-| Media figura, desde una imagen frontal o de perfil | `profundidad` |
-| Figura completa | `imagen-3d` o `tripo3d` |
-| Ya tienes la malla hecha | `castkit ingesta` |
-| Herramienta externa propia | `comando` |
+La entrevista guiada (abajo) elige el proveedor por ti, a partir de lo que **se ve** en la
+imagen (castkit no lo detecta solo; lo decides tú al responder «¿Qué tipo de pieza es?»):
+
+| Lo que se ve en la imagen | Tipo de pieza en la entrevista | Proveedor |
+| --- | --- | --- |
+| Colores planos, sin sombras (un logo, un escudo) | colores planos | `relieve` |
+| Volumen, sombras, una foto o un render | con volumen o sombras | `profundidad` |
+| La figura completa (de pie, no solo el frente) | figura completa | `imagen-3d` o `tripo3d` |
+| Ya tienes la malla hecha | — | `castkit ingesta` |
+| Herramienta externa propia | — | `comando` |
+
+Las piezas curvas (como una taza) todavía no tienen proveedor
+([#44](https://github.com/alexisbanda/castkit/issues/44)).
 
 ### Ejemplo: del dibujo a la matriz
 
@@ -337,7 +343,7 @@ Nombre del diseño: toro
 Carpeta del brief: ~/pedidos/brief-toro
 Encontré 1 imagen: toro-frente-sinfondo.png
 ¿Qué imprime castkit? 1) el molde listo para verter silicona (cubeta) 2) solo la figura, para hacer el molde aparte [1]:
-¿Qué tipo de pieza es? 1) diseño plano (logo, escudo, medalla) 2) media figura (frente con relieve, espalda plana) 3) figura completa [2]:
+¿Qué tipo de pieza es? 1) colores planos, sin sombras (como un logo o un escudo) 2) con volumen, sombras, es una foto o un render 3) la figura completa [2]:
 Largo en mm [80]:
 Grosor en mm [15]:
 Material de la pieza final 1) porcelana-fria 2) silicona 3) cera [2]:
@@ -350,15 +356,16 @@ Origen del modelo base: dibujo del cliente
 Resumen del diseño:
 1. Nombre: toro
 2. Carpeta del brief: /home/usuario/pedidos/brief-toro
-3. Qué imprime castkit: cubeta
-4. Tipo de molde: abierto (proveedor: profundidad)
-5. Medidas: largo 80 mm, grosor 15 mm
-6. Material de la pieza final: silicona
-7. Cavidades: 1
-8. Cantidad a producir: 10
-9. Fecha de entrega: 2026-11-15
-10. Licencia del modelo base: propio
-11. Origen del modelo base: dibujo del cliente
+3. Imagen: toro-frente-sinfondo.png
+4. Qué imprime castkit: cubeta
+5. Tipo de molde: abierto (proveedor: profundidad)
+6. Medidas: largo 80 mm, grosor 15 mm
+7. Material de la pieza final: silicona
+8. Cavidades: 1
+9. Cantidad a producir: 10
+10. Fecha de entrega: 2026-11-15
+11. Licencia del modelo base: propio
+12. Origen del modelo base: dibujo del cliente
 ¿Crear el diseño? (S/n, o el número de la línea que quieres cambiar):
 Diseño «toro» creado en /home/usuario/toro.
 Siguiente paso: castkit flujo toro
@@ -367,13 +374,38 @@ Siguiente paso: castkit flujo toro
 Cada medida acepta punto o coma decimal (`92,5`); un largo o alto mayor de 300 mm, o un grosor
 mayor o igual que el largo, pide confirmación `(s/N)` antes de aceptarse (con «n» se vuelve a
 preguntar esa medida). El tipo de pieza fija el tipo de molde y el proveedor de generación 3D que
-se guardan en la versión: **plano** → `abierto` + `relieve`; **media figura** → `abierto` +
-`profundidad`; **figura completa** → `completo` + `imagen-3d` (con el aviso de que el molde de
-dos partes, [#14](https://github.com/alexisbanda/castkit/issues/14), todavía no existe). En el
-resumen final, Intro o «s» crea el diseño, «n» no crea nada (código de salida 1) y el número de
-una línea la vuelve a preguntar (si cambia el tipo de pieza o el modo, también lo que depende de
-ella: medidas o cavidades). Toda respuesta inválida muestra el motivo en español y repite solo
-esa pregunta, sin perder las respuestas anteriores.
+se guardan en la versión: **colores planos** → `abierto` + `relieve`; **con volumen o sombras**
+→ `abierto` + `profundidad`; **figura completa** → `completo` + `imagen-3d` (con el aviso de que
+el molde de dos partes, [#14](https://github.com/alexisbanda/castkit/issues/14), todavía no
+existe). En el resumen final, Intro o «s» crea el diseño, «n» no crea nada (código de salida 1) y
+el número de una línea la vuelve a preguntar (si cambia el tipo de pieza o el modo, también lo que
+depende de ella: medidas o cavidades; si cambia la carpeta del brief, también se repiten las
+preguntas de imagen y vista, ver abajo). Toda respuesta inválida muestra el motivo en español y
+repite solo esa pregunta, sin perder las respuestas anteriores.
+
+#### Elegir imagen y vista
+
+Si el brief tiene **dos o más imágenes legibles**, la entrevista pregunta cuál usar (con solo
+una, se usa esa sin preguntar). Una imagen con extensión de imagen que no se puede abrir (un
+archivo dañado) se avisa por su nombre y no se ofrece para elegir; un `.stl` en el brief se avisa
+mencionando `castkit ingesta` (si ya tienes la malla hecha, no hace falta generarla de nuevo). Si
+no queda ninguna imagen legible, aparece el aviso de brief sin imágenes de siempre.
+
+Con la imagen elegida:
+
+- **Si su fondo no es liso ni transparente**, la entrevista avisa y pide una versión con fondo
+  liso o transparente (puedes seguir con la entrevista; no se pregunta nada de vistas).
+- **Si tiene dos o más vistas** (figuras separadas, por ejemplo varias fotos del mismo pedido en
+  una sola imagen), la entrevista informa cuántas encontró y pregunta cuál modelar, nombrándolas
+  por su posición: «izquierda»/«derecha» con dos, «izquierda»/«centro»/«derecha» con tres, «vista
+  1», «vista 2»... con más. Con una sola vista no se pregunta nada. La vista elegida se recorta
+  (con un margen y el resto pintado del color de fondo, o transparente) y ese recorte, no la
+  imagen original, es el que usan los proveedores al generar la malla.
+
+El resumen final muestra la imagen elegida (y la vista, si hubo que elegirla); si cambias la línea
+de la carpeta del brief, se repiten las preguntas de imagen y vista. `castkit alta <nombre> ...`
+sin entrevista (uso clásico, abajo) no pregunta nada de esto y sigue usando la primera imagen por
+orden alfabético, igual que siempre.
 
 Cualquier opción ya indicada en el propio comando (`--brief`, `--material`, `--modo`,
 `--proveedor`, etc.) no se vuelve a preguntar. Con `nombre` en el comando (el uso clásico, abajo)
@@ -776,18 +808,23 @@ uv run castkit generar guagua-pan --prompt "guagua de pan tradicional sin socava
 
 Los `.pdf` y `.ai` del brief solo los recibe el proveedor `comando` (vía la variable de entorno
 `CASTKIT_INSUMOS`, ver abajo): los demás proveedores integrados (`imagen-3d`, `relieve`,
-`tripo3d`) ignoran documentos y mallas `.stl` del brief, y solo usan la primera imagen de
-`brief/` junto con el texto/prompt.
+`tripo3d`) ignoran documentos y mallas `.stl` del brief, y solo usan una imagen (la elegida en la
+entrevista guiada, ticket #93 —o su recorte, si se eligió una vista—, o la primera por orden
+alfabético si el diseño no pasó por la entrevista) junto con el texto/prompt.
 
 ### Proveedores integrados
 
 | Proveedor | Qué usa del brief | Requiere |
 | --- | --- | --- |
 | `comando` | todos los insumos (imágenes, `.pdf`/`.ai`, prompt); se los pasa a un comando externo | `comando` en `[generacion]`; si está vacío y hay imágenes, recurre a `imagen-3d` |
-| `imagen-3d` | solo la primera imagen (reconstructor volumétrico local, sin red) | nada (no necesita claves de API) |
-| `relieve` | solo la primera imagen (bajorrelieve local por capas de color, sin red) | molde abierto: `--tipo-molde abierto --largo-mm <mm> --grosor-mm <mm>` (ver abajo) |
-| `profundidad` | solo la primera imagen (media figura local por mapa de profundidad, sin red) | molde abierto (igual que `relieve`) y el extra opcional `profundidad` (`uv sync --extra profundidad`) |
-| `tripo3d` | la primera imagen (Imagen→3D) o, si no hay imágenes, el prompt (Texto→3D), vía la API v3 de Tripo | variable de entorno `TRIPO_API_KEY` |
+| `imagen-3d` | solo una imagen (reconstructor volumétrico local, sin red) | nada (no necesita claves de API) |
+| `relieve` | solo una imagen (bajorrelieve local por capas de color, sin red) | molde abierto: `--tipo-molde abierto --largo-mm <mm> --grosor-mm <mm>` (ver abajo) |
+| `profundidad` | solo una imagen (media figura local por mapa de profundidad, sin red) | molde abierto (igual que `relieve`) y el extra opcional `profundidad` (`uv sync --extra profundidad`) |
+| `tripo3d` | una imagen (Imagen→3D) o, si no hay imágenes, el prompt (Texto→3D), vía la API v3 de Tripo | variable de entorno `TRIPO_API_KEY` |
+
+¿Cuál imagen es «una imagen»? Ver «Elegir imagen y vista», arriba: la que eligió la entrevista
+guiada (o su recorte, si eligió una vista), o la primera por orden alfabético si el diseño se dio
+de alta sin entrevista.
 
 El proveedor `tripo3d` pide solo geometría (sin texturas ni PBR), registra `tripo_modelo` y
 `tripo_task_id` en `versiones.v<actual>.parametros.generacion`, y gira el GLB descargado de
@@ -899,6 +936,7 @@ proveedor = "comando"
 comando = ""
 tripo_modelo = "v2.5-20250123"
 tripo_espera_max_s = 600
+vista_area_min_pct = 10
 ```
 
 - `proveedor`: proveedor por defecto cuando no se pasa `--proveedor`.
@@ -907,6 +945,10 @@ tripo_espera_max_s = 600
 - `tripo_modelo`: versión del modelo de Tripo3D (API v3) usada por el proveedor `tripo3d`.
 - `tripo_espera_max_s`: plazo máximo, en segundos, que el proveedor `tripo3d` espera a que la
   tarea termine antes de fallar.
+- `vista_area_min_pct`: porcentaje mínimo del área de la figura que debe tener una parte separada
+  de la imagen para contarse como una vista propia en la entrevista guiada (ver «Elegir imagen y
+  vista», abajo); las manchas más pequeñas no cuentan. Opcional: si tu copia de este archivo es de
+  antes de este ajuste, se usa 10.
 
 ### `[relieve]` en `config/fabricacion.toml`
 

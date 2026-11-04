@@ -77,6 +77,7 @@ import trimesh
 from PIL import Image
 from scipy import ndimage
 
+from castkit.imagen_brief import _TOLERANCIA_FONDO
 from castkit.relieve import CORTE_SACRIFICABLE_MM, _formatear_numero, _seccion_mm
 
 NOMBRE_TOML = "profundidad.toml"
@@ -125,7 +126,8 @@ _SUAVIZADO_CONTORNO_PX = 1.2
 
 # Distancia RGB mínima al color de fondo (mediana del borde de la imagen) para que
 # un píxel se considere parte de la figura, cuando la imagen no tiene canal alfa.
-_TOLERANCIA_FONDO = 20.0
+# Vive en :mod:`castkit.imagen_brief` (compartida con la entrevista guiada, #93, y con
+# el futuro proveedor «imagen-3d», #54); se importa de ahí para no duplicarla.
 
 
 class ProfundidadError(Exception):
