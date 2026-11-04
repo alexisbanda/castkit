@@ -61,6 +61,7 @@ class Vista:
 
     nombre: str
     caja: tuple[int, int, int, int]  # (fila_min, col_min, fila_max, col_max), excl.
+    area: int = 0  # Píxeles de la componente rellena (ver _candidatos_vistas).
 
 
 @dataclass(frozen=True)
@@ -137,9 +138,9 @@ def _nombres_vistas(n: int) -> list[str]:
 
 def _candidatos_vistas(
     mascara: np.ndarray, area_min_pct: float
-) -> list[tuple[float, int, tuple[int, int, int, int]]]:
+) -> list[tuple[float, int, tuple[int, int, int, int], int]]:
     """Componentes conexas de ``mascara`` (tras rellenar huecos) que alcanzan el
-    umbral de área, como ``(centro_x, etiqueta, caja)``, sin ordenar todavía.
+    umbral de área, como ``(centro_x, etiqueta, caja, area)``, sin ordenar todavía.
     """
     rellena = ndimage.binary_fill_holes(mascara)
     etiquetas, n = ndimage.label(rellena)
@@ -150,7 +151,7 @@ def _candidatos_vistas(
     umbral = (area_min_pct / 100.0) * area_total
     cajas = ndimage.find_objects(etiquetas)
 
-    candidatos: list[tuple[float, int, tuple[int, int, int, int]]] = []
+    candidatos: list[tuple[float, int, tuple[int, int, int, int], int]] = []
     for etiqueta in range(1, n + 1):
         caja = cajas[etiqueta - 1]
         if caja is None:
@@ -161,7 +162,7 @@ def _candidatos_vistas(
             continue
         centro_x = (col_s.start + col_s.stop) / 2.0
         caja = (fila_s.start, col_s.start, fila_s.stop, col_s.stop)
-        candidatos.append((centro_x, etiqueta, caja))
+        candidatos.append((centro_x, etiqueta, caja, area))
     return candidatos
 
 
@@ -189,10 +190,17 @@ def analizar_imagen(ruta: Path, area_min_pct: float = AREA_MIN_PCT_DEFECTO) -> A
     candidatos = sorted(_candidatos_vistas(mascara, area_min_pct), key=lambda c: c[0])
     nombres = _nombres_vistas(len(candidatos))
     vistas = tuple(
-        Vista(nombre=nombre, caja=caja)
-        for (_, _, caja), nombre in zip(candidatos, nombres, strict=True)
+        Vista(nombre=nombre, caja=caja, area=area)
+        for (_, _, caja, area), nombre in zip(candidatos, nombres, strict=True)
     )
     return AnalisisImagen(legible=True, fondo_uniforme=True, vistas=vistas)
+
+
+def vista_mayor(vistas: tuple[Vista, ...]) -> Vista | None:
+    """Devuelve la vista de mayor área de ``vistas``; ``None`` si está vacía."""
+    if not vistas:
+        return None
+    return max(vistas, key=lambda v: v.area)
 
 
 def recortar_vista(
@@ -232,7 +240,7 @@ def recortar_vista(
             f'La imagen "{ruta_imagen.name}" ya no tiene una vista "{nombre_vista}".'
         ) from None
 
-    _, etiqueta, (fila_min_c, col_min_c, fila_max_c, col_max_c) = candidatos[indice]
+    _, etiqueta, (fila_min_c, col_min_c, fila_max_c, col_max_c), _ = candidatos[indice]
     rellena = ndimage.binary_fill_holes(mascara)
     etiquetas, _ = ndimage.label(rellena)
 

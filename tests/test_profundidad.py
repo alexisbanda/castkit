@@ -646,3 +646,25 @@ def test_pared_no_se_engancha_a_la_rejilla_de_mm_por_px(tmp_path: Path) -> None:
     fraccion_en_rejilla = float(np.mean(resto_x < 0.01))
 
     assert fraccion_en_rejilla < 0.25
+
+
+# ---------------------------------------------------------------------------
+# Criterio (#94): un canal alfa totalmente opaco (todo 255) se trata como sin
+# alfa, igual que en `castkit.imagen_brief` — sin esto, una imagen RGBA opaca
+# da como figura el rectángulo entero (y el aviso de vistas nombraría una
+# vista que nunca se modeló).
+# ---------------------------------------------------------------------------
+
+
+def test_mascara_figura_con_alfa_totalmente_opaco_se_trata_como_sin_alfa() -> None:
+    arr = np.zeros((40, 40, 4), dtype=np.uint8)
+    arr[:, :] = (255, 255, 255, 255)
+    arr[10:20, 10:20] = (0, 0, 0, 255)  # figura opaca, pero de color distinto del fondo
+    rgb = arr[..., :3].astype(np.float64)
+    alfa = arr[..., 3].astype(np.float64)
+
+    mascara = profundidad._mascara_figura(rgb, alfa)
+
+    assert not mascara.all()
+    assert mascara[15, 15]
+    assert not mascara[0, 0]

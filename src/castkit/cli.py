@@ -1475,6 +1475,7 @@ def _ejecutar_generar(args: argparse.Namespace) -> int:
             proveedor=args.proveedor,
             prompt=args.prompt,
             reemplazar=reemplazar,
+            informar=print,
         )
     except (AltaError, VersionError, ConfigError, GeneracionError) as exc:
         print(f"Error: {exc}", file=sys.stderr)

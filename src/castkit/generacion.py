@@ -41,6 +41,7 @@ from castkit.config import (
     cargar_config_profundidad,
     cargar_config_relieve,
 )
+from castkit.imagen_brief import analizar_imagen, vista_mayor
 from castkit.ingesta import IngestaError, sha256_archivo, validar_malla
 from castkit.versiones import (
     VersionError,
@@ -707,6 +708,13 @@ class ProveedorComando:
     def __init__(self, comando: str) -> None:
         self.comando = comando.strip()
 
+    @property
+    def recibe_todas_las_imagenes(self) -> bool:
+        """Con un comando real recibe todas las imágenes (``CASTKIT_INSUMOS``); con uno
+        vacío delega en :class:`ProveedorImagen3D`, que usa solo la primera.
+        """
+        return bool(self.comando)
+
     def generar(self, insumos: InsumosBrief, destino_stl: Path) -> None:
         if not self.comando:
             if insumos.imagenes:
@@ -868,6 +876,7 @@ def generar_malla(
     proveedor: str | None = None,
     prompt: str | None = None,
     reemplazar: bool = False,
+    informar: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """Obtiene o genera la malla en bruto de la versión actual desde el brief.
 
@@ -883,6 +892,16 @@ def generar_malla(
        tampoco hay uno guardado, el de `config/fabricacion.toml`. Valida el
        STL generado, lo guarda en `input/` y registra los parámetros en la
        etapa `"generacion"`.
+
+    `informar` (ticket #94), si se pasa, recibe avisos en español ANTES de
+    generar la malla (la generación por proveedores locales tarda minutos):
+    qué proveedor se usó y de dónde vino (flag, versión o configuración), qué
+    imagen se usó si el brief tenía varias sin una elección guardada, y —para
+    los proveedores `relieve`/`profundidad`— cuántas vistas se detectaron en
+    la imagen. Con el proveedor `relieve` (que solo admite una figura), dos o
+    más vistas hacen fallar la generación con :class:`GeneracionError` en vez
+    de avisar. Si `informar` es `None`, no se informa nada (comportamiento
+    igual que antes de este ticket).
     """
     carpeta = Path(carpeta)
     datos = cargar_diseno(carpeta)
@@ -910,6 +929,8 @@ def generar_malla(
         metricas = _copiar_y_validar_stl_atomico(stl_brief, destino)
         nombre_proveedor = "stl-directo"
         archivos_usados = [stl_brief.name]
+        if informar is not None:
+            informar("Proveedor: stl-directo (hay un STL en el brief).")
     else:
         info_version = datos_version(datos)
         # Si no se pasó --proveedor explícito, se usa el proveedor guardado en
@@ -958,6 +979,69 @@ def generar_malla(
                 f"para generar la malla 3D (formatos aceptados: {formatos_txt}, o bien "
                 "pasa --prompt con la descripción)."
             )
+
+        # Avisos (#94), siempre ANTES de generar (la generación por proveedores
+        # locales tarda minutos): qué proveedor se usó y de dónde vino, qué imagen
+        # se usó si hay varias sin elección guardada, y cuántas vistas se
+        # detectaron (relieve/profundidad). El origen se informa recién aquí,
+        # después de `obtener_proveedor` (más arriba), para que un nombre de
+        # proveedor desconocido siga fallando como antes de avisar nada.
+        if proveedor is not None:
+            if info_version.get("proveedor") and str(info_version["proveedor"]) != proveedor:
+                mensaje_origen = (
+                    f"Proveedor: {nombre_proveedor} (del flag --proveedor; la versión "
+                    f"recuerda {info_version['proveedor']})."
+                )
+            else:
+                mensaje_origen = f"Proveedor: {nombre_proveedor} (del flag --proveedor)."
+        elif info_version.get("proveedor"):
+            mensaje_origen = f"Proveedor: {nombre_proveedor} (recordado en la versión)."
+        else:
+            mensaje_origen = f"Proveedor: {nombre_proveedor} (de la configuración)."
+        if informar is not None:
+            informar(mensaje_origen)
+
+        if (
+            len(insumos.imagenes) >= 2
+            and not imagen_guardada
+            and not getattr(instancia_proveedor, "recibe_todas_las_imagenes", False)
+        ):
+            primera_imagen = insumos.imagenes[0]
+            if informar is not None:
+                informar(
+                    f"Usando {primera_imagen.name}, la primera de {len(insumos.imagenes)} "
+                    "imágenes del brief."
+                )
+
+        if nombre_proveedor in ("relieve", "profundidad") and insumos.imagenes:
+            analisis_vistas = analizar_imagen(
+                insumos.imagenes[0], area_min_pct=float(config_gen["vista_area_min_pct"])
+            )
+            if len(analisis_vistas.vistas) >= 2:
+                if nombre_proveedor == "relieve":
+                    raise GeneracionError(
+                        f'La imagen "{insumos.imagenes[0].name}" tiene '
+                        f"{len(analisis_vistas.vistas)} vistas (figuras separadas); el "
+                        'proveedor "relieve" solo admite una. Deja una sola figura en la '
+                        "imagen, o genera con --proveedor profundidad para construir una "
+                        "media figura a partir de varias vistas."
+                    )
+                mayor = vista_mayor(analisis_vistas.vistas)
+                if mayor is not None and informar is not None:
+                    # Frases que leen bien tanto con los nombres por posición
+                    # (izquierda/centro/derecha, con géneros distintos en español)
+                    # como con "vista N" (4 o más vistas); no se asume que la mayor
+                    # sea siempre "la izquierda".
+                    frases_posicion = {
+                        "izquierda": "la de la izquierda",
+                        "centro": "la del centro",
+                        "derecha": "la de la derecha",
+                    }
+                    frase_vista = frases_posicion.get(mayor.nombre, f"la {mayor.nombre}")
+                    informar(
+                        f"Aviso: encontré {len(analisis_vistas.vistas)} vistas en "
+                        f"{insumos.imagenes[0].name} y se modelará {frase_vista}."
+                    )
 
         descriptor, tmp_gen_str = tempfile.mkstemp(
             prefix=f".{nombre_destino}.gen-", dir=destino.parent, suffix=".stl"

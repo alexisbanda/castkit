@@ -77,7 +77,7 @@ import trimesh
 from PIL import Image
 from scipy import ndimage
 
-from castkit.imagen_brief import _TOLERANCIA_FONDO
+from castkit.imagen_brief import _TOLERANCIA_FONDO, _alfa_es_real
 from castkit.relieve import CORTE_SACRIFICABLE_MM, _formatear_numero, _seccion_mm
 
 NOMBRE_TOML = "profundidad.toml"
@@ -276,9 +276,12 @@ def _cargar_rgb_y_alfa(ruta_imagen: Path) -> tuple[np.ndarray, np.ndarray | None
 def _mascara_figura(rgb: np.ndarray, alfa: np.ndarray | None) -> np.ndarray:
     """Separa la figura del fondo: el canal alfa si existe; si no, el color del borde (tolerancia).
 
-    Se queda con la componente conexa más grande y rellena sus huecos.
+    Se queda con la componente conexa más grande y rellena sus huecos. Un canal alfa
+    totalmente opaco (todo 255) se trata como sin alfa (ver
+    :func:`castkit.imagen_brief._alfa_es_real`): sin esto, una imagen RGBA opaca
+    daría como figura el rectángulo entero.
     """
-    if alfa is not None:
+    if _alfa_es_real(alfa):
         figura = alfa > 128.0
     else:
         borde = np.vstack([rgb[0, :], rgb[-1, :], rgb[:, 0], rgb[:, -1]])
