@@ -253,13 +253,19 @@ def cargar_config_limpieza() -> dict[str, Any]:
 def cargar_config_generacion() -> dict[str, Any]:
     """Carga la sección `[generacion]` de `config/fabricacion.toml`.
 
-    Devuelve un `dict` con las claves `proveedor`, `comando`, `tripo_modelo`
-    y `tripo_espera_max_s`.
+    Devuelve un `dict` con las claves `proveedor`, `comando`, `tripo_modelo`,
+    `tripo_espera_max_s` y `vista_area_min_pct`. Todas salvo `proveedor` y `comando`
+    son opcionales (una copia de `fabricacion.toml` creada antes del ticket #93 no
+    tiene `vista_area_min_pct`; se usa 10 por defecto).
     """
     return _cargar_seccion(
         "generacion",
         _CLAVES_GENERACION,
-        opcionales={"tripo_modelo": "v2.5-20250123", "tripo_espera_max_s": 600},
+        opcionales={
+            "tripo_modelo": "v2.5-20250123",
+            "tripo_espera_max_s": 600,
+            "vista_area_min_pct": 10.0,
+        },
     )
 
 

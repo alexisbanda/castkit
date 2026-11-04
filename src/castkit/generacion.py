@@ -928,6 +928,29 @@ def generar_malla(
         if callable(metodo_usar_version):
             metodo_usar_version(info_version)
 
+        # Si la entrevista guiada (#93) eligió una imagen (o el recorte de una vista),
+        # esa es la que debe usar el proveedor, sea o no la primera por orden
+        # alfabético: se adelanta al principio de `insumos.imagenes` sin tocar el
+        # resto. Si ya no está en el brief, se falla con un mensaje claro en vez de
+        # usar otra imagen en su lugar.
+        imagen_guardada = info_version.get("imagen")
+        if imagen_guardada:
+            ruta_imagen_guardada = carpeta / "brief" / imagen_guardada
+            if not ruta_imagen_guardada.is_file():
+                raise GeneracionError(
+                    f'La versión guardó "{imagen_guardada}" como la imagen a usar, pero ya '
+                    f'no está en "{carpeta / "brief"}". Vuelve a poner ahí un archivo con '
+                    "ese nombre, o da de alta una nueva versión que no dependa de ella."
+                )
+            insumos.imagenes = [
+                ruta_imagen_guardada,
+                *(
+                    img
+                    for img in insumos.imagenes
+                    if img.resolve() != ruta_imagen_guardada.resolve()
+                ),
+            ]
+
         if not insumos.tiene_insumos_para_proveedor():
             formatos_txt = ", ".join(FORMATOS_SOPORTADOS)
             raise GeneracionError(

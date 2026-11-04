@@ -480,6 +480,7 @@ def test_datos_version_en_diseno_nuevo_usa_los_datos_de_la_version(diseno_v1: Pa
     # `largo_mm` y `grosor_mm` (este diseño es de molde `completo`, así que
     # `largo_mm`/`grosor_mm` quedan en `None`). Desde el ticket #65, también
     # devuelve `proveedor` y `modo_matriz`, `None` en un diseño que no los dio.
+    # Desde el ticket #93, también devuelve `imagen`, igualmente `None` aquí.
     assert resultado == {
         "version": 1,
         "tipo_molde": "completo",
@@ -489,6 +490,7 @@ def test_datos_version_en_diseno_nuevo_usa_los_datos_de_la_version(diseno_v1: Pa
         "cavidades": 4,
         "proveedor": None,
         "modo_matriz": None,
+        "imagen": None,
         "parametros": {},
     }
 

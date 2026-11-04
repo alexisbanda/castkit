@@ -199,6 +199,7 @@ def datos_version(datos: dict[str, Any], version: int | None = None) -> dict[str
         "cavidades": cavidades,
         "proveedor": entrada.get("proveedor"),
         "modo_matriz": entrada.get("modo_matriz"),
+        "imagen": entrada.get("imagen"),
         "parametros": entrada.get("parametros", {}),
     }
 
@@ -279,6 +280,7 @@ def crear_version(
         "cavidades": cavidades_efectivas,
         "proveedor": anterior["proveedor"],
         "modo_matriz": anterior["modo_matriz"],
+        "imagen": anterior["imagen"],
         "parametros": copy.deepcopy(anterior["parametros"]),
     }
 

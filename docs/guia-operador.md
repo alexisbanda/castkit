@@ -136,8 +136,10 @@ vas a usar. Para que el resultado salga bien:
 - **Fondo liso o transparente.** Si la foto tiene un fondo con textura, degradado o distinto del
   color del borde de la figura, castkit puede sacarle una placa de más a la pieza (ver el caso
   «la placa de más» en [«Cuando algo falla»](#7-cuando-algo-falla)).
-- **Una sola figura por imagen.** Si el dibujo trae varias figuras o elementos sueltos, sepáralas
-  en imágenes distintas antes de dar de alta.
+- **Una sola figura por imagen, o varias vistas separadas.** Si la imagen trae varias figuras
+  sueltas (por ejemplo varias fotos del mismo pedido juntas), la entrevista las detecta como
+  «vistas» y te deja elegir cuál modelar por su posición (izquierda, centro, derecha...); no hace
+  falta separarlas a mano en archivos distintos.
 - **Vista frontal o de perfil**, según la pieza. Para una media figura (como el toro) usa una
   vista frontal; el proveedor `profundidad` calcula el relieve a partir de esa única vista.
 
@@ -169,7 +171,7 @@ Nombre del diseño: toro
 Carpeta del brief: ~/pedidos/brief-toro
 Encontré 1 imagen: toro-dibujo.png
 ¿Qué imprime castkit? 1) el molde listo para verter silicona (cubeta) 2) solo la figura, para hacer el molde aparte [1]: 1
-¿Qué tipo de pieza es? 1) diseño plano (logo, escudo, medalla) 2) media figura (frente con relieve, espalda plana) 3) figura completa [2]: 2
+¿Qué tipo de pieza es? 1) colores planos, sin sombras (como un logo o un escudo) 2) con volumen, sombras, es una foto o un render 3) la figura completa [2]: 2
 Largo en mm [80]: 80
 Grosor en mm [15]: 15
 Material de la pieza final 1) porcelana-fria 2) silicona 3) cera [2]: 2
@@ -182,15 +184,16 @@ Origen del modelo base: dibujo del cliente
 Resumen del diseño:
 1. Nombre: toro
 2. Carpeta del brief: /home/usuario/pedidos/brief-toro
-3. Qué imprime castkit: cubeta
-4. Tipo de molde: abierto (proveedor: profundidad)
-5. Medidas: largo 80 mm, grosor 15 mm
-6. Material de la pieza final: silicona
-7. Cavidades: 1
-8. Cantidad a producir: 10
-9. Fecha de entrega: 2026-11-15
-10. Licencia del modelo base: propio
-11. Origen del modelo base: dibujo del cliente
+3. Imagen: toro-dibujo.png
+4. Qué imprime castkit: cubeta
+5. Tipo de molde: abierto (proveedor: profundidad)
+6. Medidas: largo 80 mm, grosor 15 mm
+7. Material de la pieza final: silicona
+8. Cavidades: 1
+9. Cantidad a producir: 10
+10. Fecha de entrega: 2026-11-15
+11. Licencia del modelo base: propio
+12. Origen del modelo base: dibujo del cliente
 ¿Crear el diseño? (S/n, o el número de la línea que quieres cambiar):
 Diseño «toro» creado en /home/usuario/toro.
 Siguiente paso: castkit flujo toro

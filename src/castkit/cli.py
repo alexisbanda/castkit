@@ -6,12 +6,14 @@ import argparse
 import contextlib
 import math
 import sys
+from collections.abc import Callable
 from datetime import date, timedelta
 from pathlib import Path
 
 from castkit.comprobar import comprobar_instalacion, imprimir_estado_blender
 from castkit.config import (
     ConfigError,
+    cargar_config_generacion,
     cargar_config_limpieza,
     cargar_config_matriz,
     cargar_config_mecha,
@@ -41,6 +43,7 @@ from castkit.entrevista import (
     preguntar_texto,
 )
 from castkit.generacion import GeneracionError, generar_malla, recolectar_insumos_brief
+from castkit.imagen_brief import AnalisisImagen, analizar_imagen
 from castkit.ingesta import IngestaError, ingerir_malla, validar_malla
 from castkit.limpieza import EJES_ACEPTADOS, LimpiezaError, limpiar_malla, validar_arriba
 from castkit.matriz import MODOS_MATRIZ, MatrizError, generar_matriz, validar_modo_matriz
@@ -688,6 +691,12 @@ def _ejecutar_alta_guiada(args: argparse.Namespace) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
+    try:
+        _area_min_pct_vistas = float(cargar_config_generacion()["vista_area_min_pct"])
+    except ConfigError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
     def _validar_nombre_disponible(valor: str) -> None:
         try:
             validar_nombre(valor)
@@ -722,7 +731,68 @@ def _ejecutar_alta_guiada(args: argparse.Namespace) -> int:
                 "(relieve, profundidad) necesitan una."
             )
 
-    def _preguntar_brief() -> Path:
+    def _elegir_imagen_y_vista(ruta: Path) -> tuple[str | None, str | None]:
+        """Avisa de insumos problemáticos del brief y, si aplica, pregunta qué imagen
+        y qué vista usar (ticket #93). Devuelve ``(imagen, vista)`` (nombres de
+        archivo dentro del brief; ambos ``None`` si no hay ninguna imagen legible).
+        """
+        insumos = recolectar_insumos_brief(ruta)
+        for stl in insumos.mallas_stl:
+            print(
+                f'Aviso: encontré "{stl.name}" (un .stl) en el brief; si ya tienes la malla 3D '
+                "hecha, usa «castkit ingesta» en vez de generarla de nuevo."
+            )
+
+        legibles: list[tuple[Path, AnalisisImagen]] = []
+        for ruta_img in insumos.imagenes:
+            analisis = analizar_imagen(ruta_img, area_min_pct=_area_min_pct_vistas)
+            if analisis.legible:
+                legibles.append((ruta_img, analisis))
+            else:
+                print(
+                    f'Aviso: no se pudo abrir "{ruta_img.name}" como imagen; no se '
+                    "ofrecerá para elegir."
+                )
+
+        if not legibles:
+            print(
+                "Aviso: no encontré ninguna imagen en el brief; los proveedores locales "
+                "(relieve, profundidad) necesitan una."
+            )
+            return None, None
+
+        if len(legibles) >= 2:
+            opciones_imagen = tuple((ruta_img.name, ruta_img.name) for ruta_img, _ in legibles)
+            nombre_elegido = preguntar_opcion_numerada(
+                "¿Qué imagen quieres usar?", None, opciones_imagen, legibles[0][0].name
+            )
+            ruta_elegida, analisis = next((r, a) for r, a in legibles if r.name == nombre_elegido)
+        else:
+            ruta_elegida, analisis = legibles[0]
+
+        if not analisis.fondo_uniforme:
+            print(
+                f'Aviso: el fondo de "{ruta_elegida.name}" no es liso ni transparente; pide al '
+                "cliente una versión con fondo liso o transparente antes de generar la malla "
+                "(por ahora puedes seguir con la entrevista)."
+            )
+            return ruta_elegida.name, None
+
+        if len(analisis.vistas) >= 2:
+            n_vistas = len(analisis.vistas)
+            print(f'Encontré {n_vistas} vistas en "{ruta_elegida.name}".')
+            opciones_vista = tuple((v.nombre, v.nombre) for v in analisis.vistas)
+            vista_elegida = preguntar_opcion_numerada(
+                "¿Cuál vista quieres modelar?",
+                None,
+                opciones_vista,
+                analisis.vistas[0].nombre,
+            )
+            return ruta_elegida.name, vista_elegida
+
+        return ruta_elegida.name, None
+
+    def _preguntar_brief() -> tuple[Path, str | None, str | None]:
         texto = preguntar_texto(
             "Carpeta del brief",
             "Carpeta con las imágenes, documentos o texto del brief del cliente.",
@@ -731,7 +801,8 @@ def _ejecutar_alta_guiada(args: argparse.Namespace) -> int:
         )
         ruta = Path(_limpiar_ruta(texto))
         _informar_insumos_brief(ruta)
-        return ruta
+        imagen, vista = _elegir_imagen_y_vista(ruta)
+        return ruta, imagen, vista
 
     _OPCIONES_MODO = (
         ("cubeta", "el molde listo para verter silicona (cubeta)"),
@@ -742,13 +813,20 @@ def _ejecutar_alta_guiada(args: argparse.Namespace) -> int:
         return preguntar_opcion_numerada("¿Qué imprime castkit?", None, _OPCIONES_MODO, "cubeta")
 
     _OPCIONES_PIEZA = (
-        ("plano", "diseño plano (logo, escudo, medalla)"),
-        ("media", "media figura (frente con relieve, espalda plana)"),
-        ("completa", "figura completa"),
+        ("plano", "colores planos, sin sombras (como un logo o un escudo)"),
+        ("media", "con volumen, sombras, es una foto o un render"),
+        ("completa", "la figura completa"),
     )
 
     def _preguntar_tipo_pieza() -> tuple[str, str]:
-        pieza = preguntar_opcion_numerada("¿Qué tipo de pieza es?", None, _OPCIONES_PIEZA, "media")
+        pieza = preguntar_opcion_numerada(
+            "¿Qué tipo de pieza es?",
+            "Elige según lo que se ve en la imagen (castkit no lo detecta solo). Para "
+            "piezas curvas, como una taza, todavía no hay proveedor "
+            "(https://github.com/alexisbanda/castkit/issues/44).",
+            _OPCIONES_PIEZA,
+            "media",
+        )
         tipo_molde_nuevo, proveedor_nuevo = _PIEZA_A_MOLDE_PROVEEDOR[pieza]
         if pieza == "completa":
             print(
@@ -847,8 +925,9 @@ def _ejecutar_alta_guiada(args: argparse.Namespace) -> int:
             return 1
         brief = Path(_limpiar_ruta(args.brief))
         _informar_insumos_brief(brief)
+        imagen, vista = _elegir_imagen_y_vista(brief)
     else:
-        brief = _preguntar_brief()
+        brief, imagen, vista = _preguntar_brief()
 
     # --- 3. Qué imprime castkit (modo de matriz) ---------------------------
     if args.modo:
@@ -969,7 +1048,86 @@ def _ejecutar_alta_guiada(args: argparse.Namespace) -> int:
     origen = args.origen if args.origen is not None else _preguntar_origen()
 
     # --- Resumen numerado, editable antes de crear el diseño ----------------
-    def _lineas_resumen() -> list[str]:
+    # Se construye como una lista de (texto, función que repregunta esa línea) en
+    # vez de números fijos: las líneas de «Imagen» y «Vista» solo aparecen cuando
+    # aplican (#93) y desplazan a las demás, así que el número de cada línea se
+    # recalcula en cada vuelta del bucle en vez de quedar fijo en el código.
+    def _no_editable(mensaje: str) -> Callable[[], None]:
+        def _editar() -> None:
+            print(mensaje)
+
+        return _editar
+
+    def _editar_nombre() -> None:
+        nonlocal nombre
+        nombre = _preguntar_nombre()
+
+    def _editar_brief() -> None:
+        nonlocal brief, imagen, vista
+        brief, imagen, vista = _preguntar_brief()
+
+    def _editar_imagen_y_vista() -> None:
+        nonlocal imagen, vista
+        imagen, vista = _elegir_imagen_y_vista(brief)
+
+    def _editar_modo() -> None:
+        nonlocal modo, cavidades
+        modo = _preguntar_modo()
+        if modo == "figura":
+            cavidades = 1
+        else:
+            cavidades = _preguntar_cavidades(cavidades if cavidades else 1)
+
+    def _editar_tipo_pieza() -> None:
+        nonlocal tipo_molde, proveedor, alto_mm, largo_mm, grosor_mm
+        tipo_molde, proveedor = _preguntar_tipo_pieza()
+        if tipo_molde == "completo":
+            alto_mm = _preguntar_alto()
+            largo_mm = grosor_mm = None
+        else:
+            largo_mm = _preguntar_largo()
+            grosor_mm = _preguntar_grosor(largo_mm)
+            alto_mm = None
+
+    def _editar_medidas() -> None:
+        nonlocal alto_mm, largo_mm, grosor_mm
+        if tipo_molde == "completo":
+            alto_mm = _preguntar_alto()
+        else:
+            largo_mm = _preguntar_largo()
+            grosor_mm = _preguntar_grosor(largo_mm)
+
+    def _editar_material() -> None:
+        nonlocal material
+        material = _preguntar_material()
+
+    def _editar_cavidades() -> None:
+        nonlocal cavidades
+        if modo == "figura":
+            print(
+                "Las cavidades están fijas en 1 porque el modo es «figura»; cambia la "
+                "línea «Qué imprime castkit» si necesitas una cubeta con varias."
+            )
+        else:
+            cavidades = _preguntar_cavidades(cavidades)
+
+    def _editar_cantidad() -> None:
+        nonlocal cantidad
+        cantidad = _preguntar_cantidad()
+
+    def _editar_fecha() -> None:
+        nonlocal fecha
+        fecha = _preguntar_fecha_entrega()
+
+    def _editar_licencia() -> None:
+        nonlocal licencia
+        licencia = _preguntar_licencia()
+
+    def _editar_origen() -> None:
+        nonlocal origen
+        origen = _preguntar_origen()
+
+    def _construir_campos() -> list[tuple[str, Callable[[], None]]]:
         if tipo_molde == "completo":
             medida_txt = f"alto {formatear_numero(alto_mm)} mm"
         else:
@@ -977,26 +1135,42 @@ def _ejecutar_alta_guiada(args: argparse.Namespace) -> int:
                 f"largo {formatear_numero(largo_mm)} mm, grosor {formatear_numero(grosor_mm)} mm"
             )
         proveedor_txt = proveedor if proveedor else "sin asignar"
-        return [
-            f"Nombre: {nombre}",
-            f"Carpeta donde se creará: {(destino / nombre).resolve()}",
-            f"Carpeta del brief: {brief}",
-            f"Qué imprime castkit: {modo}",
-            f"Tipo de molde: {tipo_molde} (proveedor: {proveedor_txt})",
-            f"Medidas: {medida_txt}",
-            f"Material de la pieza final: {material}",
-            f"Cavidades: {cavidades}",
-            f"Cantidad a producir: {cantidad}",
-            f"Fecha de entrega: {fecha.isoformat()}",
-            f"Licencia del modelo base: {licencia}",
-            f"Origen del modelo base: {origen}",
+
+        campos: list[tuple[str, Callable[[], None]]] = [
+            (f"Nombre: {nombre}", _editar_nombre),
+            (
+                f"Carpeta donde se creará: {(destino / nombre).resolve()}",
+                _no_editable(
+                    "La carpeta se calcula a partir del nombre; cambia esa línea si quieres "
+                    "que el diseño se cree en otro sitio."
+                ),
+            ),
+            (f"Carpeta del brief: {brief}", _editar_brief),
         ]
+        if imagen is not None:
+            campos.append((f"Imagen: {imagen}", _editar_imagen_y_vista))
+            if vista is not None:
+                campos.append((f"Vista: {vista}", _editar_imagen_y_vista))
+        campos.extend(
+            [
+                (f"Qué imprime castkit: {modo}", _editar_modo),
+                (f"Tipo de molde: {tipo_molde} (proveedor: {proveedor_txt})", _editar_tipo_pieza),
+                (f"Medidas: {medida_txt}", _editar_medidas),
+                (f"Material de la pieza final: {material}", _editar_material),
+                (f"Cavidades: {cavidades}", _editar_cavidades),
+                (f"Cantidad a producir: {cantidad}", _editar_cantidad),
+                (f"Fecha de entrega: {fecha.isoformat()}", _editar_fecha),
+                (f"Licencia del modelo base: {licencia}", _editar_licencia),
+                (f"Origen del modelo base: {origen}", _editar_origen),
+            ]
+        )
+        return campos
 
     while True:
-        lineas = _lineas_resumen()
+        campos = _construir_campos()
         print("\nResumen del diseño:")
-        for indice, linea in enumerate(lineas, start=1):
-            print(f"{indice}. {linea}")
+        for indice, (texto, _editar) in enumerate(campos, start=1):
+            print(f"{indice}. {texto}")
 
         respuesta = (
             input("¿Crear el diseño? (S/n, o el número de la línea que quieres cambiar): ")
@@ -1009,60 +1183,11 @@ def _ejecutar_alta_guiada(args: argparse.Namespace) -> int:
         if respuesta in ("n", "no"):
             print("No se ha creado nada.", file=sys.stderr)
             return 1
-        if respuesta.isdigit() and 1 <= int(respuesta) <= len(lineas):
-            indice_editar = int(respuesta)
-            if indice_editar == 1:
-                nombre = _preguntar_nombre()
-            elif indice_editar == 2:
-                # La carpeta se calcula a partir del nombre (línea 1) y no es
-                # un dato propio de la entrevista: no tiene pregunta propia.
-                print(
-                    "La carpeta se calcula a partir del nombre (línea 1); cambia esa "
-                    "línea si quieres que el diseño se cree en otro sitio."
-                )
-            elif indice_editar == 3:
-                brief = _preguntar_brief()
-            elif indice_editar == 4:
-                modo = _preguntar_modo()
-                if modo == "figura":
-                    cavidades = 1
-                else:
-                    cavidades = _preguntar_cavidades(cavidades if cavidades else 1)
-            elif indice_editar == 5:
-                tipo_molde, proveedor = _preguntar_tipo_pieza()
-                if tipo_molde == "completo":
-                    alto_mm = _preguntar_alto()
-                    largo_mm = grosor_mm = None
-                else:
-                    largo_mm = _preguntar_largo()
-                    grosor_mm = _preguntar_grosor(largo_mm)
-                    alto_mm = None
-            elif indice_editar == 6:
-                if tipo_molde == "completo":
-                    alto_mm = _preguntar_alto()
-                else:
-                    largo_mm = _preguntar_largo()
-                    grosor_mm = _preguntar_grosor(largo_mm)
-            elif indice_editar == 7:
-                material = _preguntar_material()
-            elif indice_editar == 8:
-                if modo == "figura":
-                    print(
-                        "Las cavidades están fijas en 1 porque el modo es «figura»; "
-                        "cambia la línea 4 si necesitas una cubeta con varias."
-                    )
-                else:
-                    cavidades = _preguntar_cavidades(cavidades)
-            elif indice_editar == 9:
-                cantidad = _preguntar_cantidad()
-            elif indice_editar == 10:
-                fecha = _preguntar_fecha_entrega()
-            elif indice_editar == 11:
-                licencia = _preguntar_licencia()
-            elif indice_editar == 12:
-                origen = _preguntar_origen()
+        if respuesta.isdigit() and 1 <= int(respuesta) <= len(campos):
+            _, editar = campos[int(respuesta) - 1]
+            editar()
             continue
-        print(f"Respuesta inválida: escribe «s», «n» o un número de línea entre 1 y {len(lineas)}.")
+        print(f"Respuesta inválida: escribe «s», «n» o un número de línea entre 1 y {len(campos)}.")
 
     try:
         datos = DatosAlta(
@@ -1080,6 +1205,9 @@ def _ejecutar_alta_guiada(args: argparse.Namespace) -> int:
             grosor_mm=grosor_mm,
             proveedor=proveedor,
             modo_matriz=modo,
+            imagen=imagen,
+            vista=vista,
+            vista_area_min_pct=_area_min_pct_vistas,
         )
         ruta = crear_diseno(datos, destino=destino)
     except AltaError as exc:
